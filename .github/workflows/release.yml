@@ -1,0 +1,186 @@
+name: release
+
+# Release CI for llama-wasm. Triggered only by a `v*` tag, it runs the exact
+# same wasmify pipeline as build.yml (so the released artifacts are rebuilt from
+# the tagged source, not promoted from an unverified earlier run), stages the
+# release assets, attaches SLSA build-provenance attestations, and creates the
+# GitHub Release.
+#
+# Assets:
+#   * llama.wasm            — raw wasi-sdk artifact (binaryen-optimised).
+#   * llama_wasm2go.go      — protoc-gen-wasmify-go's wasm2go bridge, which
+#                             go-llama commits as llama.go.
+#   * llama_wasm2go.tar.gz  — the build/wasm2go/internal/wasm2go bundle, a
+#                             self-contained Go module after bundle-gomod, which
+#                             the llamawasm2go module repo downloads and extracts.
+#   * llama_wasm2go.sha256  — sha256sum manifest of the tarball contents; doubles
+#                             as the attestation subject-checksums so any
+#                             extracted file verifies individually.
+#
+# Releasing lives ONLY here, never in build.yml — so pull requests and main
+# pushes build and verify but never publish. No `tags:` trigger in build.yml
+# means a tag push runs this workflow alone (no double build, no race).
+#
+# The toolchain (wasi-sdk, binaryen, buf, the wasmify CLI) lives inside the
+# wasmify base image, so the build runs entirely in a container; the
+# project-specific cache image (pushed by build.yml on main) is read for warmth
+# when present. `docker run` (not the GHA `container:` directive) so a
+# free-disk-space step can run on the host before the container starts.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write          # create the GitHub Release + upload assets
+  packages: read           # read the cache image from ghcr (never pushed here)
+  id-token: write          # actions/attest-build-provenance OIDC token
+  attestations: write
+
+env:
+  # Pinned to a released wasmify image. The cache image inherits this base layer
+  # via `docker commit`, and the tag is baked into the cache key so a wasmify
+  # upgrade rolls forward cleanly (a bumped tag misses the old cache and rebuilds).
+  WASMIFY_IMAGE: ghcr.io/goccy/wasmify:v0.4.10
+  CACHE_IMAGE: ghcr.io/${{ github.repository_owner }}/llama-wasm-cache
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk space on the runner
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: false
+          swap-storage: false
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Resolve cache image tag from wasmify version + llama.cpp submodule SHA
+        id: cache_key
+        run: |
+          submodule_sha=$(git -C llama.cpp rev-parse HEAD)
+          wasmify_tag="${WASMIFY_IMAGE##*:}"
+          if [ -z "$wasmify_tag" ] || [ "$wasmify_tag" = "$WASMIFY_IMAGE" ]; then
+            wasmify_tag="untagged"
+          fi
+          echo "tag=${CACHE_IMAGE}:${wasmify_tag}-${submodule_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Try to pull cache image
+        # `docker pull` exits non-zero on a missing tag; a miss is not a failure,
+        # downstream steps branch on the recorded `hit` flag.
+        id: cache_pull
+        continue-on-error: true
+        run: |
+          if docker pull "${{ steps.cache_key.outputs.tag }}"; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore generated files from cache image (warm path)
+        # Cache hit: the cold build's .wasmify object cache and the EH-enabled
+        # C++ runtimes live at /cache/output in the cache image. Copy them back
+        # so wasmify's incremental detection and build-eh-runtimes.sh's version
+        # stamp can short-circuit unchanged work.
+        if: steps.cache_pull.outputs.hit == 'true'
+        run: |
+          container=$(docker create "${{ steps.cache_key.outputs.tag }}")
+          docker cp "${container}:/cache/output/." "$PWD/"
+          docker rm -f "${container}"
+          ls -la .wasmify deps/wasi-eh 2>/dev/null | head -10 || true
+
+      - name: Resolve build base image
+        id: base
+        run: |
+          if [ "${{ steps.cache_pull.outputs.hit }}" = "true" ]; then
+            echo "image=${{ steps.cache_key.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            docker pull "$WASMIFY_IMAGE"
+            echo "image=$WASMIFY_IMAGE" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run wasmify pipeline
+        # The same sequence as `make wasm`, regenerating every derived artefact
+        # (build.json, api-spec.json, proto/, bridge/, the wasm2go bundle) from
+        # source — so none of them are committed. Detached with `sleep infinity`
+        # so the post-build container can be `docker commit`ed (cache miss only).
+        # `buf generate --timeout 0` disables buf's 2-minute plugin timeout: the
+        # wasm2go flavour SSA-lowers a wasm this size over several minutes, and
+        # a SIGKILL there surfaces only as "signal: killed".
+        run: |
+          docker run -d --name wasmify-build \
+            -v "$PWD:/work" -w /work \
+            -e WASMIFY_NON_INTERACTIVE=1 \
+            --entrypoint sleep \
+            "${{ steps.base.outputs.image }}" infinity
+          docker exec wasmify-build bash -ceuxo pipefail '
+            make tools
+            bash scripts/wasi-configure.sh
+            wasmify build --non-interactive
+            wasmify generate-build
+            wasmify parse-headers --header llama_api.h
+            wasmify gen-proto
+            wasmify wasm-build --optimize --non-interactive
+            rm -rf build
+            buf generate --timeout 0
+            make bundle-gomod
+          '
+
+      - name: Stop build container
+        if: always()
+        run: docker rm -f wasmify-build 2>/dev/null || true
+
+      - name: Stage release artifacts
+        run: |
+          mkdir -p release
+          cp .wasmify/wasm-build/output/llama.wasm release/llama.wasm
+          cp build/wasm2go/llama.go release/llama_wasm2go.go
+          tar -czf release/llama_wasm2go.tar.gz -C build/wasm2go/internal/wasm2go .
+          ( cd build/wasm2go/internal/wasm2go && find . -type f -print0 | sort -z \
+              | xargs -0 sha256sum ) > release/llama_wasm2go.sha256
+          # The bundle is only usable as a Go module; bundle-gomod must have run.
+          test -f build/wasm2go/internal/wasm2go/go.mod \
+            || { echo "::error::bundle go.mod missing — make bundle-gomod did not run"; exit 1; }
+          # The wasm must import nothing beyond WASI and the C++ exception tag:
+          # anything else means a host dependency slipped in that a Go consumer
+          # would have to implement.
+          python3 scripts/check-imports.py release/llama.wasm
+
+      - uses: actions/attest-build-provenance@v2
+        # Provenance only on `push` events and only when the repo is public.
+        if: github.event.repository.visibility == 'public'
+        with:
+          subject-path: |
+            release/llama.wasm
+            release/llama_wasm2go.go
+
+      - uses: actions/attest-build-provenance@v2
+        # wasm2go bundle: one attestation whose subjects are the per-file digests
+        # in the manifest, so any file extracted from the tarball verifies.
+        if: github.event.repository.visibility == 'public'
+        with:
+          subject-checksums: release/llama_wasm2go.sha256
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/llama.wasm
+            release/llama_wasm2go.go
+            release/llama_wasm2go.tar.gz
+            release/llama_wasm2go.sha256

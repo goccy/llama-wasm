@@ -1,0 +1,187 @@
+/* llama_api.h — thin llama.cpp embedding API exported to wasm / Go.
+ *
+ * This is the ONLY surface wasmify exports from libllama. llama.cpp's full API
+ * stays internal; Go callers see just these functions. Pinned against the
+ * llama.cpp the `llama.cpp` submodule pins, built for wasm32-wasip1 with
+ * wasm exception handling (llama.cpp throws) and -msimd128.
+ *
+ * Conventions, matching the sibling wasmify projects:
+ *
+ *   - Handles are opaque uint64 values (the address of the heap-allocated
+ *     state). A model handle and a context handle are independent: one model
+ *     can back several contexts, which is how llama.cpp is meant to be used.
+ *     Zero is the failure / null handle.
+ *   - String INPUTS are `const char*` plus an EXPLICIT length — never strlen —
+ *     so a prompt containing an embedded NUL crosses the bridge intact.
+ *   - String OUTPUTS are `std::string`, which the bridge generator returns as
+ *     a Go string. Structured results are JSON so one call carries a whole
+ *     result without a per-field export.
+ *   - Errors are returned, never thrown across the boundary: a call that can
+ *     fail returns a JSON object with `"ok"` and, when false, `"error"`.
+ *     llama.cpp's own exceptions are caught at this boundary.
+ *
+ * Threading model: a context is driven from one thread at a time. The
+ * generation loop checks an interrupt flag whose ADDRESS is exposed
+ * (llama_ctx_interrupt_addr), so a host thread can stop a running generation
+ * by writing to that address in linear memory — the same idiom go-perl uses
+ * for perl_interrupt_addr.
+ */
+#ifndef LLAMA_WASM_LLAMA_API_H
+#define LLAMA_WASM_LLAMA_API_H
+
+#include <cstdint>
+#include <string>
+
+/* ---------------------------------------------------------------- backend */
+
+/* Initialize the ggml backend registry. Idempotent; called automatically by
+ * llama_model_load, so an embedder normally never calls it. */
+void llama_wasm_init();
+
+/* Free process-wide backend state. After this every handle is invalid. */
+void llama_wasm_free();
+
+/* JSON describing the build: llama.cpp version, the ggml backends compiled in,
+ * and whether this wasm was built with SIMD / threads. Diagnostics only. */
+std::string llama_wasm_build_info();
+
+/* ------------------------------------------------------------------ model */
+
+/* Load a GGUF model from `path` and return an opaque handle (0 on failure;
+ * call llama_wasm_last_error for the reason).
+ *
+ * `n_gpu_layers` is accepted and ignored — a wasm build has no GPU backend —
+ * so callers can pass a config through unchanged.
+ *
+ * `use_mmap` is likewise accepted for API symmetry: WASI has no usable mmap,
+ * so the loader always reads the file. Progress is reported through the
+ * progress flag described at llama_model_load_progress_addr. */
+uint64_t llama_model_load(const char *path, uint32_t path_len,
+                          int32_t n_gpu_layers, int32_t use_mmap);
+
+/* Free a model. Contexts created from it must be freed first. */
+void llama_model_free(uint64_t model);
+
+/* JSON metadata for a loaded model: architecture, parameter count, context
+ * length, embedding dimension, layer/head counts, rope type, vocabulary size,
+ * and the chat template when the GGUF carries one. */
+std::string llama_model_info(uint64_t model);
+
+/* Address, in linear memory, of a float the loader updates with its progress
+ * (0.0 .. 1.0) while llama_model_load runs. A host thread can poll it to drive
+ * a progress bar. Valid for the lifetime of the wasm instance. */
+uint32_t llama_model_load_progress_addr();
+
+/* ---------------------------------------------------------------- context */
+
+/* Create a context over `model`.
+ *
+ * `n_ctx` 0 means "the model's training context length". `n_batch` /
+ * `n_ubatch` 0 mean llama.cpp's defaults. `n_threads` 0 means 1 (a
+ * single-threaded wasm build ignores anything else; a threads build uses it).
+ * `embeddings` non-zero puts the context in embedding mode. `seed` seeds the
+ * default sampler chain; 0 means a fixed, reproducible seed. */
+uint64_t llama_ctx_new(uint64_t model, uint32_t n_ctx, uint32_t n_batch,
+                       uint32_t n_ubatch, uint32_t n_threads,
+                       int32_t embeddings, uint32_t seed);
+
+/* Free a context. */
+void llama_ctx_free(uint64_t ctx);
+
+/* Address of this context's interrupt flag (a uint32 in linear memory).
+ * Writing a non-zero value from another thread makes the running
+ * llama_ctx_generate stop at its next token and return what it has, with
+ * `"interrupted":true`. The generation loop clears the flag when it starts. */
+uint32_t llama_ctx_interrupt_addr(uint64_t ctx);
+
+/* -------------------------------------------------------------- tokenizer */
+
+/* Tokenize `text` and return JSON `{"ok":true,"tokens":[..]}`.
+ * `add_special` adds BOS/EOS per the model's convention; `parse_special`
+ * lets special-token text (e.g. "<|im_start|>") tokenize as that token. */
+std::string llama_tokenize(uint64_t model, const char *text, uint32_t text_len,
+                           int32_t add_special, int32_t parse_special);
+
+/* Render tokens (a JSON array of ints) back to text:
+ * `{"ok":true,"text":"..."}`. */
+std::string llama_detokenize(uint64_t model, const char *tokens_json,
+                             uint32_t tokens_json_len, int32_t render_special);
+
+/* The text piece a single token renders to, as JSON `{"ok":true,"text":".."}`.
+ * Byte-level tokens can render to invalid UTF-8 on their own; the caller is
+ * expected to accumulate pieces. */
+std::string llama_token_to_piece(uint64_t model, int32_t token,
+                                 int32_t render_special);
+
+/* ------------------------------------------------------------- generation */
+
+/* Run generation and return JSON:
+ *
+ *   {"ok":true,"text":"...","tokens":[..],"n_prompt":N,"n_decoded":N,
+ *    "stop_reason":"eos"|"length"|"stop"|"interrupted","interrupted":bool,
+ *    "timings":{"prompt_ms":f,"decode_ms":f}}
+ *
+ * `prompt` is tokenized with add_special=true. `params_json` carries the
+ * sampling configuration; every field is optional:
+ *
+ *   {"n_predict":int,          // -1 = until EOS or context end
+ *    "temperature":float, "top_k":int, "top_p":float, "min_p":float,
+ *    "typical_p":float, "repeat_penalty":float, "repeat_last_n":int,
+ *    "presence_penalty":float, "frequency_penalty":float,
+ *    "seed":uint, "grammar":"...", "stop":["..",".."],
+ *    "stream":bool}            // see llama_ctx_take_stream
+ *
+ * With "stream":true the decoded pieces are also appended to a per-context
+ * buffer that llama_ctx_take_stream drains, so a host thread can surface
+ * tokens as they are produced instead of waiting for the call to return. */
+std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
+                               uint32_t prompt_len, const char *params_json,
+                               uint32_t params_json_len);
+
+/* Drain the streaming buffer: the text decoded since the previous call, as
+ * JSON `{"ok":true,"text":"...","done":bool}`. Safe to call from another
+ * thread while llama_ctx_generate runs. */
+std::string llama_ctx_take_stream(uint64_t ctx);
+
+/* Apply the model's chat template to `messages_json`
+ * (`[{"role":"user","content":"hi"}, ...]`) and return the prompt string:
+ * `{"ok":true,"prompt":"..."}`. `add_assistant` appends the generation
+ * prefix. When the GGUF carries no template, `template_override` is used;
+ * when both are absent the call fails. */
+std::string llama_chat_apply_template(uint64_t model, const char *messages_json,
+                                      uint32_t messages_json_len,
+                                      const char *template_override,
+                                      uint32_t template_override_len,
+                                      int32_t add_assistant);
+
+/* ------------------------------------------------------------- embeddings */
+
+/* Embed `text` with a context created with embeddings=1 and return
+ * `{"ok":true,"embedding":[..],"n_embd":N}`. `normalize` applies L2
+ * normalisation (2 = euclidean, 0 = none), matching llama.cpp's convention. */
+std::string llama_ctx_embed(uint64_t ctx, const char *text, uint32_t text_len,
+                            int32_t normalize);
+
+/* ------------------------------------------------------------- kv / state */
+
+/* Drop the context's KV cache so the next generation starts fresh. */
+void llama_ctx_reset(uint64_t ctx);
+
+/* Serialize the context state (KV cache + RNG) into the context's state
+ * buffer and return `{"ok":true,"addr":N,"size":N}` — the caller reads that
+ * many bytes at that linear-memory address. The buffer stays valid until the
+ * next state call on this context. */
+std::string llama_ctx_state_save(uint64_t ctx);
+
+/* Restore a context state previously produced by llama_ctx_state_save, read
+ * from `size` bytes at linear-memory address `addr`. */
+std::string llama_ctx_state_load(uint64_t ctx, uint32_t addr, uint32_t size);
+
+/* ------------------------------------------------------------------ error */
+
+/* The message for the most recent failed call on this thread, or "" when the
+ * last call succeeded. Calls that return JSON carry their own "error" field;
+ * this exists for the handle-returning calls, which can only signal 0. */
+std::string llama_wasm_last_error();
+
+#endif /* LLAMA_WASM_LLAMA_API_H */

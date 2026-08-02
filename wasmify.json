@@ -1,0 +1,122 @@
+{
+  "version": "1.0",
+  "upstream": {
+    "path": "./llama.cpp",
+    "commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
+    "branch": "master"
+  },
+  "project": {
+    "name": "llama",
+    "root_dir": "./llama.cpp",
+    "language": "cpp",
+    "language_standard": "c++17"
+  },
+  "build_system": {
+    "type": "cmake",
+    "files": [
+      "llama.cpp/CMakeLists.txt",
+      "llama.cpp/src/CMakeLists.txt",
+      "llama.cpp/ggml/CMakeLists.txt",
+      "llama.cpp/ggml/src/CMakeLists.txt"
+    ]
+  },
+  "targets": [
+    {
+      "name": "llama",
+      "type": "library",
+      "build_target": "libllama.a",
+      "source_dirs": [
+        "llama.cpp/src",
+        "llama.cpp/ggml/src"
+      ],
+      "description": "Static llama.cpp inference library plus the ggml CPU backend, built for wasm32-wasip1 with wasm exception handling and SIMD128. The embedding API in llama_api.h links against this."
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "wasi-sdk",
+      "type": "tool",
+      "required": true
+    },
+    {
+      "name": "cmake",
+      "type": "tool",
+      "required": true
+    },
+    {
+      "name": "ninja",
+      "type": "tool",
+      "required": true
+    }
+  ],
+  "build_commands": {
+    "configure": "bash scripts/wasi-configure.sh",
+    "build": "cmake --build build-wasi --target llama --parallel $(nproc)"
+  },
+  "user_selection": {
+    "target_name": "llama",
+    "build_type": "library"
+  },
+  "bridge": {
+    "CustomBridgeSources": [
+      "llama_api.cc"
+    ],
+    "GoPackage": "github.com/goccy/go-llama;llama",
+    "Wasm2GoImportPath": "github.com/goccy/llamawasm2go",
+    "StackSize": 8388608,
+    "ExportFunctions": [
+      "llama_wasm_init",
+      "llama_wasm_free",
+      "llama_wasm_build_info",
+      "llama_wasm_last_error",
+      "llama_model_load",
+      "llama_model_free",
+      "llama_model_info",
+      "llama_model_load_progress_addr",
+      "llama_ctx_new",
+      "llama_ctx_free",
+      "llama_ctx_interrupt_addr",
+      "llama_tokenize",
+      "llama_detokenize",
+      "llama_token_to_piece",
+      "llama_ctx_generate",
+      "llama_ctx_take_stream",
+      "llama_chat_apply_template",
+      "llama_ctx_embed",
+      "llama_ctx_reset",
+      "llama_ctx_state_save",
+      "llama_ctx_state_load"
+    ]
+  },
+  "wasm_build": {
+    "extra_cxxflags": [
+      "-std=gnu++17",
+      "-fwasm-exceptions",
+      "-msimd128",
+      "-D_WASI_EMULATED_SIGNAL",
+      "-D_WASI_EMULATED_MMAN",
+      "-D_WASI_EMULATED_PROCESS_CLOCKS",
+      "-D_WASI_EMULATED_GETPID",
+      "-nostdinc++",
+      "-isystem",
+      "deps/wasi-eh/include/c++/v1"
+    ],
+    "bridge_extra_includes": [
+      "llama.cpp/include",
+      "llama.cpp/ggml/include"
+    ],
+    "extra_ldflags": [
+      "-nostdlib++",
+      "-Ldeps/wasi-eh/lib",
+      "-lc++",
+      "-lc++abi",
+      "-lunwind",
+      "-ldl",
+      "-lwasi-emulated-process-clocks",
+      "-lwasi-emulated-mman",
+      "-lwasi-emulated-signal",
+      "-lwasi-emulated-getpid",
+      "-Wl,--allow-undefined-file=scripts/allow-undefined.txt"
+    ]
+  }
+}

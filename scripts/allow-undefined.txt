@@ -1,0 +1,13 @@
+# Symbols wasm-ld may leave undefined at link time.
+#
+# __cpp_exception is the C++ exception TAG. LLVM emits it as an undefined tag
+# import (env.__cpp_exception, one i32 parameter) in every object that uses
+# -fwasm-exceptions, and nothing defines it: the host supplies it. wasm-ld's
+# --import-undefined only covers functions, so the tag needs this explicit
+# allowance. wasm2go provides the tag itself, so the generated Go needs no
+# host-side wiring.
+#
+# Listing exactly this one symbol — rather than passing --allow-undefined —
+# keeps every OTHER undefined symbol a link error, which is what catches a
+# missing wasi shim before it becomes a runtime trap.
+__cpp_exception

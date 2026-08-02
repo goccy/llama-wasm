@@ -1,0 +1,19 @@
+version: v2
+inputs:
+  - directory: .
+    paths:
+      - proto/llama.proto
+plugins:
+  # wasm2go binding — emits the bridge plus the transpiled internal/wasm2go tree
+  # under build/wasm2go/. go-llama consumes that bundle (released as
+  # llama_wasm2go.tar.gz). The wasm= path resolves against the CWD of
+  # `buf generate` (project root); the pipeline runs `wasmify wasm-build` first,
+  # so the file is present. The bundle's own import path
+  # (github.com/goccy/llamawasm2go) comes from the proto's wasm2go_package
+  # option, which gen-proto writes from wasmify.json's bridge.Wasm2GoImportPath.
+  - local: protoc-gen-wasmify-go
+    out: build/wasm2go
+    opt:
+      - module=github.com/goccy/go-llama
+      - runtime=wasm2go
+      - wasm=.wasmify/wasm-build/output/llama.wasm
