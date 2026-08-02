@@ -682,19 +682,31 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
         const char *stop_reason = "length";
         bool interrupted = false;
 
-        llama_batch batch = llama_batch_get_one(toks.data(), (int32_t) toks.size());
+        // Decode the prompt in n_batch-sized chunks: llama_decode rejects
+        // a batch larger than the context's n_batch, and splitting is the
+        // CALLER's job (native llama.cpp CLIs do the same). The interrupt
+        // flag is honoured between chunks so a long prompt can be stopped.
+        const int nb = (int) llama_n_batch(st->ctx);
         int n_decoded = 0;
-        for (int i = 0; i < budget; i++) {
+        bool prompt_ok = true;
+        for (int off = 0; off < n_prompt && !interrupted; off += nb) {
             if (st->interrupt != 0) {
                 interrupted = true;
                 stop_reason = "interrupted";
                 break;
             }
-            if (llama_decode(st->ctx, batch) != 0) {
-                st->generating = false;
-                        llama_sampler_free(smpl);
-                return json_err("generate: decode failed");
+            const int take = std::min(nb, n_prompt - off);
+            if (llama_decode(st->ctx, llama_batch_get_one(toks.data() + off, take)) != 0) {
+                prompt_ok = false;
+                break;
             }
+        }
+        if (!prompt_ok) {
+            st->generating = false;
+            llama_sampler_free(smpl);
+            return json_err("generate: decode failed");
+        }
+        for (int i = 0; i < budget && !interrupted; i++) {
             const llama_token tok = llama_sampler_sample(smpl, st->ctx, -1);
             if (llama_vocab_is_eog(vocab, tok)) {
                 stop_reason = "eos";
@@ -712,7 +724,19 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
                 stop_reason = "stop";
                 break;
             }
-            batch = llama_batch_get_one(&produced.back(), 1);
+            if (i + 1 == budget) {
+                break; // budget spent: skip the decode whose logits no one samples
+            }
+            if (st->interrupt != 0) {
+                interrupted = true;
+                stop_reason = "interrupted";
+                break;
+            }
+            if (llama_decode(st->ctx, llama_batch_get_one(&produced.back(), 1)) != 0) {
+                st->generating = false;
+                llama_sampler_free(smpl);
+                return json_err("generate: decode failed");
+            }
         }
         st->generating = false;
         llama_sampler_free(smpl);
