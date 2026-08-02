@@ -48,8 +48,11 @@ if [ ! -d "$SRC/runtimes" ]; then
     curl -fSL --proto '=https' --tlsv1.2 -o "$TARBALL" \
       "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/llvm-project-$LLVM_VERSION.src.tar.xz"
   fi
-  # Only the runtimes and the cmake modules they include. libc/ comes along
-  # because libcxx's from_chars includes libc/shared/fp_bits.h.
+  # The runtimes plus what their CMake reaches for:
+  #   libc/    libcxx's from_chars includes libc/shared/fp_bits.h
+  #   cmake/, llvm/cmake/   the shared module path
+  #   llvm/utils/llvm-lit   runtimes/CMakeLists.txt add_subdirectory()s it
+  #                         unconditionally, even with tests disabled
   tar -xf "$TARBALL" -C "$WORK" \
     "llvm-project-$LLVM_VERSION.src/runtimes" \
     "llvm-project-$LLVM_VERSION.src/libcxx" \
@@ -57,14 +60,28 @@ if [ ! -d "$SRC/runtimes" ]; then
     "llvm-project-$LLVM_VERSION.src/libunwind" \
     "llvm-project-$LLVM_VERSION.src/libc" \
     "llvm-project-$LLVM_VERSION.src/cmake" \
-    "llvm-project-$LLVM_VERSION.src/llvm/cmake"
+    "llvm-project-$LLVM_VERSION.src/llvm/cmake" \
+    "llvm-project-$LLVM_VERSION.src/llvm/utils/llvm-lit"
 fi
 
-# wasi-libc has no copy_file_range; libcxx enables it for every musl-like libc.
+# wasi-libc has no copy_file_range, but libcxx enables it for every musl-like
+# libc. Narrow the guard with python rather than sed: the line is full of the
+# characters every sed delimiter would collide with.
 OPS="$SRC/libcxx/src/filesystem/operations.cpp"
-if grep -q '^#if _LIBCPP_GLIBC_PREREQ(2, 27) || _LIBCPP_HAS_MUSL_LIBC || defined(__FreeBSD__)$' "$OPS"; then
-  sed -i.bak 's|^#if _LIBCPP_GLIBC_PREREQ(2, 27) || _LIBCPP_HAS_MUSL_LIBC || defined(__FreeBSD__)$|#if (_LIBCPP_GLIBC_PREREQ(2, 27) \|\| _LIBCPP_HAS_MUSL_LIBC \|\| defined(__FreeBSD__)) \&\& !defined(__wasi__)|' "$OPS"
-fi
+python3 - "$OPS" <<'PATCH'
+import sys
+
+path = sys.argv[1]
+old = "#if _LIBCPP_GLIBC_PREREQ(2, 27) || _LIBCPP_HAS_MUSL_LIBC || defined(__FreeBSD__)"
+new = ("#if (_LIBCPP_GLIBC_PREREQ(2, 27) || _LIBCPP_HAS_MUSL_LIBC || "
+       "defined(__FreeBSD__)) && !defined(__wasi__)")
+src = open(path).read()
+if new in src:
+    sys.exit(0)          # already patched
+if old not in src:
+    sys.exit("copy_file_range guard not found in " + path)
+open(path, "w").write(src.replace(old, new, 1))
+PATCH
 
 BUILD="$WORK/build-eh"
 rm -rf "$BUILD"

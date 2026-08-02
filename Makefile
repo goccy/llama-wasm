@@ -8,11 +8,31 @@ IMAGE ?= ghcr.io/goccy/wasmify:v0.4.10
 MEMORY ?= 10g
 CPUS   ?= 8
 
-# The wasmify image is published linux/amd64 only. On an arm64 host (Apple
-# Silicon) set DOCKER_PLATFORM=linux/amd64 to run it under emulation:
-#   make wasm DOCKER_PLATFORM=linux/amd64
-DOCKER_PLATFORM ?=
-PLATFORM_FLAG := $(if $(DOCKER_PLATFORM),--platform=$(DOCKER_PLATFORM),)
+# Container runtime. Apple's `container` is the default on macOS (it runs Linux
+# images natively on Apple Silicon without Docker Desktop); everywhere else the
+# default is docker. Override to pick another: `make wasm CONTAINER=podman`.
+ifeq ($(shell uname -s),Darwin)
+CONTAINER ?= $(shell command -v container 2>/dev/null || echo docker)
+else
+CONTAINER ?= docker
+endif
+
+# The wasmify image is published linux/amd64 only, so an Apple Silicon host runs
+# it emulated and needs the platform spelled out. `uname -m` is not a reliable
+# probe on macOS — a shell started under Rosetta reports x86_64 on an arm64
+# machine — so ask sysctl instead. Set CONTAINER_PLATFORM= (empty) to let the
+# runtime choose.
+ifeq ($(shell uname -s),Darwin)
+HOST_IS_ARM64 := $(shell sysctl -n hw.optional.arm64 2>/dev/null)
+else
+HOST_IS_ARM64 := $(if $(filter aarch64 arm64,$(shell uname -m)),1,)
+endif
+ifeq ($(HOST_IS_ARM64),1)
+CONTAINER_PLATFORM ?= linux/amd64
+else
+CONTAINER_PLATFORM ?=
+endif
+PLATFORM_FLAG := $(if $(CONTAINER_PLATFORM),--platform=$(CONTAINER_PLATFORM),)
 
 # Bundle module path / go directive stamped into the wasm2go bundle's go.mod.
 # The bundle is released as a self-contained Go module, so it needs a go.mod
@@ -22,6 +42,36 @@ PLATFORM_FLAG := $(if $(DOCKER_PLATFORM),--platform=$(DOCKER_PLATFORM),)
 WASM2GO_BUNDLE_DIR    := build/wasm2go/internal/wasm2go
 WASM2GO_BUNDLE_GO_VER := 1.25.0
 
+# WASMIFY_SRC / WASM2GO_SRC point at local checkouts to build and use INSTEAD
+# of the CLI and transpiler baked into the image — the way to test a fix in
+# either before it is released:
+#   make wasm WASMIFY_SRC=../wasmify WASM2GO_SRC=../wasm2go
+# Empty (the default) uses the image's own binaries.
+WASMIFY_SRC ?=
+WASM2GO_SRC ?=
+
+ifneq ($(WASMIFY_SRC),)
+WASMIFY_SRC_MOUNT := -v $(abspath $(WASMIFY_SRC)):/wasmify-src
+# A local wasm2go is wired in with a go.mod replace inside the container, so
+# the plugin links the checkout rather than the pinned release. `go mod edit`
+# writes to the mounted source, so undo it on the way out.
+ifneq ($(WASM2GO_SRC),)
+WASM2GO_SRC_MOUNT := -v $(abspath $(WASM2GO_SRC)):/wasm2go-src
+WASM2GO_REPLACE   := go mod edit -replace github.com/goccy/wasm2go=/wasm2go-src &&
+WASM2GO_UNREPLACE := ; cd /wasmify-src && go mod edit -dropreplace github.com/goccy/wasm2go; cd /work
+else
+WASM2GO_SRC_MOUNT :=
+WASM2GO_REPLACE   :=
+WASM2GO_UNREPLACE :=
+endif
+WASMIFY_BUILD_STEP := cd /wasmify-src && $(WASM2GO_REPLACE) go build -o /usr/local/bin/wasmify ./cmd/wasmify && go build -o /usr/local/bin/protoc-gen-wasmify-go ./protoc-plugins/protoc-gen-wasmify-go && cd /work &&
+else
+WASMIFY_SRC_MOUNT :=
+WASM2GO_SRC_MOUNT :=
+WASMIFY_BUILD_STEP :=
+WASM2GO_UNREPLACE :=
+endif
+
 # Set LLAMA_THREADS=1 to configure the wasm32-wasip1-threads build, which lets
 # ggml run its kernels on several threads (wasm2go runs each guest thread on a
 # goroutine, so no host work is needed). The default single-threaded build has
@@ -29,6 +79,13 @@ WASM2GO_BUNDLE_GO_VER := 1.25.0
 LLAMA_THREADS ?= 0
 
 BUILD_ENV = WASMIFY_NON_INTERACTIVE=1 LLAMA_THREADS=$(LLAMA_THREADS)
+
+# parse-headers runs clang over llama_api.h with the flags the build captured,
+# which include the wasm target and the EH-runtime include path. A host clang
+# cannot make sense of those (it rejects wasm builtins and cannot find the wasi
+# sysroot), so point it at wasi-sdk's clang — the same compiler that built the
+# archives.
+WASI_CLANG = $${WASI_SDK_PATH:-$$HOME/.config/wasmify/bin/wasi-sdk}/bin/clang
 
 # Full pipeline replayed inside the container, top-to-bottom.
 #
@@ -41,11 +98,12 @@ BUILD_ENV = WASMIFY_NON_INTERACTIVE=1 LLAMA_THREADS=$(LLAMA_THREADS)
 # CustomBridgeSource), and buf generate + bundle-gomod produce the wasm2go
 # bundle as a self-contained Go module.
 WASMIFY_PIPELINE = \
+	$(WASMIFY_BUILD_STEP) \
 	make tools && \
 	$(BUILD_ENV) bash scripts/wasi-configure.sh && \
 	$(BUILD_ENV) wasmify build --non-interactive && \
 	wasmify generate-build && \
-	wasmify parse-headers --header llama_api.h && \
+	wasmify parse-headers --header llama_api.h --clang $(WASI_CLANG) && \
 	wasmify gen-proto && \
 	$(BUILD_ENV) wasmify wasm-build --optimize --non-interactive && \
 	rm -rf build && \
@@ -61,7 +119,7 @@ WASMIFY_PIPELINE = \
 # protoc-gen-wasmify-go mid-transpile on a wasm this size and reports only
 # "signal: killed".
 
-.PHONY: all wasm wasm-clean tools bundle-gomod smoke image-pull help
+.PHONY: all wasm wasm-clean deps-clean tools bundle-gomod smoke shell image-pull help
 
 all: wasm
 
@@ -76,12 +134,12 @@ tools:
 #   build/wasm2go/                                <- wasm2go bridge + bundle
 #   build/wasm2go/internal/wasm2go/go.mod         <- bundle module manifest
 wasm:
-	docker run --rm $(PLATFORM_FLAG) \
-		-v $(CURDIR):/work -w /work \
+	$(CONTAINER) run --rm $(PLATFORM_FLAG) \
+		-v $(CURDIR):/work $(WASMIFY_SRC_MOUNT) $(WASM2GO_SRC_MOUNT) -w /work \
 		--memory=$(MEMORY) --cpus=$(CPUS) \
 		-e WASMIFY_NON_INTERACTIVE=1 \
 		$(IMAGE) \
-		bash -c '$(WASMIFY_PIPELINE)'
+		bash -c '$(WASMIFY_PIPELINE)$(WASM2GO_UNREPLACE)'
 
 # Build and run the bridge smoke test: llama_api.cc plus a plain WASI main,
 # linked with wasi-sdk and run under a wasm runtime — no wasmify, no wasm2go,
@@ -121,9 +179,21 @@ wasm-clean:
 deps-clean:
 	rm -rf deps
 
-# Refresh the cached toolchain image.
+# Refresh the cached toolchain image. Apple's `container` nests pull under
+# `image`; docker and podman take it at the top level.
+PULL_CMD := $(if $(filter %container,$(CONTAINER)),$(CONTAINER) image pull,$(CONTAINER) pull)
+
 image-pull:
-	docker pull $(PLATFORM_FLAG) $(IMAGE)
+	$(PULL_CMD) $(PLATFORM_FLAG) $(IMAGE)
+
+# Open a shell in the toolchain image with the project mounted — the way to
+# debug a pipeline phase that fails only inside the container.
+shell:
+	$(CONTAINER) run --rm -it $(PLATFORM_FLAG) \
+		-v $(CURDIR):/work -w /work \
+		--memory=$(MEMORY) --cpus=$(CPUS) \
+		-e WASMIFY_NON_INTERACTIVE=1 \
+		$(IMAGE) bash
 
 help:
 	@echo 'Targets:'
@@ -131,11 +201,15 @@ help:
 	@echo '  smoke        Build and run the bridge smoke test (no Go involved)'
 	@echo '  wasm-clean   Drop generated artefacts; keep committed inputs and deps/'
 	@echo '  deps-clean   Drop deps/ (the EH-enabled C++ runtimes)'
-	@echo '  image-pull   docker pull $(IMAGE)'
+	@echo '  shell        Interactive shell in $(IMAGE) with the project mounted'
+	@echo '  image-pull   $(PULL_CMD) $(IMAGE)'
 	@echo ''
 	@echo 'Variables:'
-	@echo '  IMAGE           = $(IMAGE)'
-	@echo '  MEMORY          = $(MEMORY)'
-	@echo '  CPUS            = $(CPUS)'
-	@echo '  LLAMA_THREADS   = $(LLAMA_THREADS)   (1 = wasm32-wasip1-threads build)'
-	@echo '  DOCKER_PLATFORM = $(DOCKER_PLATFORM)   (set to linux/amd64 on arm64 hosts)'
+	@echo '  IMAGE              = $(IMAGE)'
+	@echo '  CONTAINER          = $(CONTAINER)'
+	@echo '  CONTAINER_PLATFORM = $(CONTAINER_PLATFORM)'
+	@echo '  MEMORY             = $(MEMORY)'
+	@echo '  CPUS               = $(CPUS)'
+	@echo '  LLAMA_THREADS      = $(LLAMA_THREADS)   (1 = wasm32-wasip1-threads build)'
+	@echo '  WASMIFY_SRC        = $(WASMIFY_SRC)   (path to a wasmify checkout to build and use)'
+	@echo '  WASM2GO_SRC        = $(WASM2GO_SRC)   (path to a wasm2go checkout; needs WASMIFY_SRC)'

@@ -14,7 +14,7 @@ target both produce, from a clean checkout:
 | --- | --- | --- |
 | `llama.wasm` | `.wasmify/wasm-build/output/llama.wasm` | The wasi-sdk-built llama.cpp — libllama plus the ggml CPU backend, behind the thin embedding API in `llama_api.h` — optimised by binaryen wasm-opt. |
 | `llama_wasm2go.tar.gz` | `build/wasm2go/internal/wasm2go/` | The transpiled pure-Go bundle, a self-contained Go module (`github.com/goccy/llamawasm2go`). go-llama depends on it. |
-| `llama_wasm2go.go` | `build/wasm2go/llama.go` | `protoc-gen-wasmify-go`'s wasm2go bridge. go-llama commits it as `llama.go`. |
+| `llama_wasm2go.go` | `build/wasm2go/llama.go` | `protoc-gen-wasmify-go`'s wasm2go bridge. go-llama commits it as `internal/bridge/llama.go` and designs its public API on top. |
 
 Everything above is **regenerated** on every build; only the inputs below are
 committed.
@@ -72,8 +72,8 @@ CI:
 
 ```
 make tools                      # ensure wasi-sdk / cmake / ninja (pre-baked in the image)
-scripts/wasi-configure.sh       # EH runtimes + CMake configure for wasm32-wasip1
-wasmify build                   # replay the captured cmake build (libllama.a + ggml)
+scripts/wasi-configure.sh       # the EH-enabled C++ runtimes
+wasmify build                   # cmake configure + build under the compiler wrapper
 wasmify generate-build          # build.log -> build.json
 wasmify parse-headers           # llama_api.h -> api-spec.json
 wasmify gen-proto               # api-spec.json -> proto/ + bridge/
@@ -87,15 +87,15 @@ make bundle-gomod               # stamp the bundle's go.mod
 `make smoke` builds `llama_api.cc` + `tests/smoke.cc` into a plain WASI command
 with wasi-sdk and runs it under Node's WASI — no wasmify, no wasm2go, no Go. It
 loads a tiny GGUF model (fetched on first run), tokenizes, generates, exercises
-stop strings, streaming, state save, the chat template and every error path.
+stop strings, the token sink, state save, the chat template and every error path.
 When something breaks after a llama.cpp bump, this says whether the engine layer
 or the Go layer is at fault.
 
 It needs the library built first:
 
 ```sh
-bash scripts/wasi-configure.sh
-cmake --build build-wasi --target llama --parallel 8
+bash scripts/wasi-configure.sh   # the EH-enabled C++ runtimes
+bash scripts/wasi-build.sh       # configure + build libllama.a
 make smoke
 ```
 

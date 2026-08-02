@@ -130,7 +130,7 @@ jobs:
             bash scripts/wasi-configure.sh
             wasmify build --non-interactive
             wasmify generate-build
-            wasmify parse-headers --header llama_api.h
+            wasmify parse-headers --header llama_api.h --clang "${WASI_SDK_PATH:-$HOME/.config/wasmify/bin/wasi-sdk}/bin/clang"
             wasmify gen-proto
             wasmify wasm-build --optimize --non-interactive
             rm -rf build

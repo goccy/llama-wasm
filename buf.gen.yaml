@@ -11,9 +11,15 @@ plugins:
   # so the file is present. The bundle's own import path
   # (github.com/goccy/llamawasm2go) comes from the proto's wasm2go_package
   # option, which gen-proto writes from wasmify.json's bridge.Wasm2GoImportPath.
+  #
+  # module= must be wasmify.json's bridge.GoPackage import path: buf strips it
+  # from the generated file names, so the bridge lands at build/wasm2go/ and
+  # the bundle at build/wasm2go/internal/wasm2go/ whatever package go-llama
+  # puts the bridge in. Stripping less (the consumer's module root) would nest
+  # both under the bridge's package directory instead.
   - local: protoc-gen-wasmify-go
     out: build/wasm2go
     opt:
-      - module=github.com/goccy/go-llama
+      - module=github.com/goccy/go-llama/internal/bridge
       - runtime=wasm2go
       - wasm=.wasmify/wasm-build/output/llama.wasm

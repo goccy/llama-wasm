@@ -31,7 +31,7 @@ EH_PREFIX="$HERE/deps/wasi-eh"
 LIB="$HERE/build-wasi"
 
 if [ ! -f "$LIB/src/libllama.a" ]; then
-  echo "libllama.a not found — run: bash scripts/wasi-configure.sh && cmake --build build-wasi --target llama" >&2
+  echo "libllama.a not found — run: bash scripts/wasi-configure.sh && bash scripts/wasi-build.sh" >&2
   exit 1
 fi
 
@@ -45,9 +45,10 @@ fi
 
 EMUL=(-D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_MMAN -D_WASI_EMULATED_PROCESS_CLOCKS -D_WASI_EMULATED_GETPID)
 CXXFLAGS=(-O2 -std=gnu++17 -msimd128 -fwasm-exceptions "${EMUL[@]}"
-          -nostdinc++ -isystem "$EH_PREFIX/include/c++/v1"
           -I"$HERE" -I"$HERE/llama.cpp/include" -I"$HERE/llama.cpp/ggml/include")
-LDFLAGS=(-nostdlib++ -L"$EH_PREFIX/lib" -L"$LIB/src" -L"$LIB/ggml/src"
+# Only the libraries come from the EH build; the headers are wasi-sdk's own
+# (same LLVM release, so they are identical).
+LDFLAGS=(-L"$EH_PREFIX/lib" -L"$LIB/src" -L"$LIB/ggml/src"
          -lllama -lggml -lggml-cpu -lggml-base
          -lc++ -lc++abi -lunwind -ldl
          -lwasi-emulated-process-clocks -lwasi-emulated-mman
