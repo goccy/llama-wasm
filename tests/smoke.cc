@@ -20,6 +20,42 @@ static bool json_ok(const std::string &s) {
     return s.find("\"ok\":true") != std::string::npos;
 }
 
+// json_escape_into applies the same escaping llama_api.cc's writer does, so a
+// raw byte string can be searched for inside a returned JSON document. Only
+// the escapes the writer can emit are covered; anything else passes through.
+static void json_escape_into(std::string &out, const std::string &s) {
+    char buf[8];
+    for (unsigned char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            case '\b': out += "\\b";  break;
+            case '\f': out += "\\f";  break;
+            default:
+                if (c < 0x20) {
+                    snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out += buf;
+                } else {
+                    out.push_back((char) c);
+                }
+        }
+    }
+}
+
+// CollectingSink is the in-process stand-in for the Go implementation the
+// bridge generates: it just accumulates what the generation loop hands it.
+struct CollectingSink : llama_wasm::token_sink {
+    std::string text;
+    int         calls = 0;
+    void on_piece(const std::string &piece) override {
+        text += piece;
+        calls++;
+    }
+};
+
 int main(int argc, char **argv) {
     const char *path = argc > 1 ? argv[1] : "stories260K.gguf";
 
@@ -63,33 +99,41 @@ int main(int argc, char **argv) {
 
     const char *params = "{\"n_predict\":16,\"temperature\":0}";
     const std::string gen = llama_ctx_generate(ctx, text, (uint32_t) strlen(text),
-                                               params, (uint32_t) strlen(params));
+                                               params, (uint32_t) strlen(params), nullptr);
     check(json_ok(gen), "generate");
     printf("generate: %s\n", gen.c_str());
 
     // Deterministic sampling must reproduce exactly.
     llama_ctx_reset(ctx);
     const std::string gen2 = llama_ctx_generate(ctx, text, (uint32_t) strlen(text),
-                                                params, (uint32_t) strlen(params));
+                                                params, (uint32_t) strlen(params), nullptr);
     check(gen == gen2, "greedy generation is reproducible");
 
     // Stop strings.
     const char *pstop = "{\"n_predict\":32,\"temperature\":0,\"stop\":[\" \"]}";
     llama_ctx_reset(ctx);
     const std::string gstop = llama_ctx_generate(ctx, text, (uint32_t) strlen(text),
-                                                 pstop, (uint32_t) strlen(pstop));
+                                                 pstop, (uint32_t) strlen(pstop), nullptr);
     check(json_ok(gstop), "generate with stop");
     check(gstop.find("\"stop_reason\":\"stop\"") != std::string::npos, "stop_reason=stop");
     printf("stop: %s\n", gstop.c_str());
 
-    // Streaming buffer drains what generation produced.
-    const char *pstream = "{\"n_predict\":8,\"temperature\":0,\"stream\":true}";
+    // The token sink must see exactly the text generation returned, one call
+    // per decoded token.
+    const char *pstream = "{\"n_predict\":8,\"temperature\":0}";
     llama_ctx_reset(ctx);
-    llama_ctx_generate(ctx, text, (uint32_t) strlen(text), pstream, (uint32_t) strlen(pstream));
-    const std::string st = llama_ctx_take_stream(ctx);
-    check(json_ok(st), "take_stream");
-    check(st.find("\"done\":true") != std::string::npos, "stream done after generate");
-    printf("stream: %s\n", st.c_str());
+    CollectingSink sink;
+    const std::string gs = llama_ctx_generate(ctx, text, (uint32_t) strlen(text),
+                                              pstream, (uint32_t) strlen(pstream), &sink);
+    check(json_ok(gs), "generate with a sink");
+    check(sink.calls == 8, "one sink call per decoded token");
+    check(!sink.text.empty(), "sink received text");
+    // The returned JSON carries the same text, escaped; comparing against the
+    // escaped form keeps this honest for pieces containing quotes or newlines.
+    std::string escaped;
+    json_escape_into(escaped, sink.text);
+    check(gs.find(escaped) != std::string::npos, "sink text matches the returned text");
+    printf("sink: %d pieces: %s\n", sink.calls, sink.text.c_str());
 
     // State save/load.
     const std::string save = llama_ctx_state_save(ctx);
@@ -110,7 +154,7 @@ int main(int argc, char **argv) {
 
     // A bad handle must be reported, never crash.
     check(!json_ok(llama_model_info(0)), "null model handle rejected");
-    check(!json_ok(llama_ctx_generate(0, text, 4, params, 4)), "null ctx handle rejected");
+    check(!json_ok(llama_ctx_generate(0, text, 4, params, 4, nullptr)), "null ctx handle rejected");
 
     // A missing model file must fail gracefully (exercises the exception path).
     const char *bad = "/nonexistent.gguf";

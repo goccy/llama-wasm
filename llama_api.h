@@ -20,11 +20,15 @@
  *     fail returns a JSON object with `"ok"` and, when false, `"error"`.
  *     llama.cpp's own exceptions are caught at this boundary.
  *
- * Threading model: a context is driven from one thread at a time. The
- * generation loop checks an interrupt flag whose ADDRESS is exposed
- * (llama_ctx_interrupt_addr), so a host thread can stop a running generation
- * by writing to that address in linear memory — the same idiom go-perl uses
- * for perl_interrupt_addr.
+ * Threading model: a context is driven from one thread at a time. Everything
+ * a host needs WHILE a call is running is therefore exposed as an address in
+ * linear memory rather than as a second entry point — a host that has
+ * translated this wasm to native code cannot enter it twice, but it can
+ * always read and write linear memory: stopping a generation
+ * (llama_ctx_interrupt_addr) and watching a model load
+ * (llama_model_load_progress_addr) are single aligned words, each with one
+ * writer. Anything larger than a word goes the other way, as a call OUT of
+ * the guest on the generating thread — see llama_wasm::token_sink.
  */
 #ifndef LLAMA_WASM_LLAMA_API_H
 #define LLAMA_WASM_LLAMA_API_H
@@ -115,6 +119,32 @@ std::string llama_token_to_piece(uint64_t model, int32_t token,
 
 /* ------------------------------------------------------------- generation */
 
+/* Sink for the text a generation produces, implemented by the host.
+ *
+ * The generation loop calls on_piece once per decoded token, synchronously,
+ * from inside llama_ctx_generate. That is deliberately not a buffer the host
+ * polls: a host that has translated this wasm to native code runs the guest
+ * on one of its own threads, so anything it read WHILE generating would be
+ * read without synchronisation. A call out of the generation loop reaches the
+ * host on the very thread that is generating, so there is nothing to
+ * synchronise.
+ *
+ * Pieces concatenate to the "text" field of the result, except that a stop
+ * string is delivered as it is decoded and only afterwards trimmed from the
+ * returned text.
+ *
+ * Abstract on purpose: wasmify emits a Go-implementable interface for a class
+ * with an unimplemented pure virtual. */
+namespace llama_wasm {
+
+class token_sink {
+public:
+    virtual ~token_sink() = default;
+    virtual void on_piece(const std::string &piece) = 0;
+};
+
+} // namespace llama_wasm
+
 /* Run generation and return JSON:
  *
  *   {"ok":true,"text":"...","tokens":[..],"n_prompt":N,"n_decoded":N,
@@ -128,20 +158,15 @@ std::string llama_token_to_piece(uint64_t model, int32_t token,
  *    "temperature":float, "top_k":int, "top_p":float, "min_p":float,
  *    "typical_p":float, "repeat_penalty":float, "repeat_last_n":int,
  *    "presence_penalty":float, "frequency_penalty":float,
- *    "seed":uint, "grammar":"...", "stop":["..",".."],
- *    "stream":bool}            // see llama_ctx_take_stream
+ *    "seed":uint, "grammar":"...", "stop":["..",".."]}
  *
- * With "stream":true the decoded pieces are also appended to a per-context
- * buffer that llama_ctx_take_stream drains, so a host thread can surface
- * tokens as they are produced instead of waiting for the call to return. */
+ * `sink`, when non-null, receives each piece as it is decoded — see
+ * llama_wasm::token_sink. The result is the same either way. */
 std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
                                uint32_t prompt_len, const char *params_json,
-                               uint32_t params_json_len);
+                               uint32_t params_json_len,
+                               llama_wasm::token_sink *sink);
 
-/* Drain the streaming buffer: the text decoded since the previous call, as
- * JSON `{"ok":true,"text":"...","done":bool}`. Safe to call from another
- * thread while llama_ctx_generate runs. */
-std::string llama_ctx_take_stream(uint64_t ctx);
 
 /* Apply the model's chat template to `messages_json`
  * (`[{"role":"user","content":"hi"}, ...]`) and return the prompt string:

@@ -3,7 +3,7 @@
   "upstream": {
     "path": "./llama.cpp",
     "commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
-    "branch": "master"
+    "branch": "HEAD"
   },
   "project": {
     "name": "llama",
@@ -49,9 +49,47 @@
       "required": true
     }
   ],
+  "required_tools": [
+    {
+      "name": "cmake",
+      "installed": false,
+      "detect_cmd": "cmake --version",
+      "install": {
+        "darwin": {
+          "commands": [
+            "brew install cmake"
+          ]
+        },
+        "debian": {
+          "commands": [
+            "apt-get update",
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake"
+          ]
+        }
+      }
+    },
+    {
+      "name": "ninja",
+      "installed": false,
+      "detect_cmd": "ninja --version",
+      "install": {
+        "darwin": {
+          "commands": [
+            "brew install ninja"
+          ]
+        },
+        "debian": {
+          "commands": [
+            "apt-get update",
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ninja-build"
+          ]
+        }
+      }
+    }
+  ],
   "build_commands": {
     "configure": "bash scripts/wasi-configure.sh",
-    "build": "cmake --build build-wasi --target llama --parallel $(nproc)"
+    "build": "bash ../scripts/wasi-build.sh"
   },
   "user_selection": {
     "target_name": "llama",
@@ -61,7 +99,7 @@
     "CustomBridgeSources": [
       "llama_api.cc"
     ],
-    "GoPackage": "github.com/goccy/go-llama;llama",
+    "GoPackage": "github.com/goccy/go-llama/internal/bridge;bridge",
     "Wasm2GoImportPath": "github.com/goccy/llamawasm2go",
     "StackSize": 8388608,
     "ExportFunctions": [
@@ -80,7 +118,7 @@
       "llama_detokenize",
       "llama_token_to_piece",
       "llama_ctx_generate",
-      "llama_ctx_take_stream",
+      "llama_wasm::token_sink",
       "llama_chat_apply_template",
       "llama_ctx_embed",
       "llama_ctx_reset",
@@ -96,10 +134,7 @@
       "-D_WASI_EMULATED_SIGNAL",
       "-D_WASI_EMULATED_MMAN",
       "-D_WASI_EMULATED_PROCESS_CLOCKS",
-      "-D_WASI_EMULATED_GETPID",
-      "-nostdinc++",
-      "-isystem",
-      "deps/wasi-eh/include/c++/v1"
+      "-D_WASI_EMULATED_GETPID"
     ],
     "bridge_extra_includes": [
       "llama.cpp/include",
@@ -118,5 +153,24 @@
       "-lwasi-emulated-getpid",
       "-Wl,--allow-undefined-file=scripts/allow-undefined.txt"
     ]
+  },
+  "phases": {
+    "gen-proto": {
+      "completed_at": "2026-08-02T02:30:43Z",
+      "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
+      "output_files": [
+        "proto/llama.proto",
+        "proto/wasmify/options.proto",
+        "bridge/api_bridge.cc",
+        "bridge/api_bridge.h"
+      ]
+    },
+    "parse-headers": {
+      "completed_at": "2026-08-02T02:30:43Z",
+      "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
+      "output_files": [
+        "api-spec.json"
+      ]
+    }
   }
 }

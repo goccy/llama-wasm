@@ -211,15 +211,6 @@ bool opt_num(const char *json, size_t len, const char *key, double &out) {
     return r.num(out);
 }
 
-bool opt_bool(const char *json, size_t len, const char *key, bool &out) {
-    JsonReader r(nullptr, 0);
-    if (!find_member(json, len, key, r)) return false;
-    r.ws();
-    if (r.p + 4 <= r.end && strncmp(r.p, "true", 4) == 0)  { out = true;  return true; }
-    if (r.p + 5 <= r.end && strncmp(r.p, "false", 5) == 0) { out = false; return true; }
-    return false;
-}
-
 bool opt_str(const char *json, size_t len, const char *key, std::string &out) {
     JsonReader r(nullptr, 0);
     if (!find_member(json, len, key, r)) return false;
@@ -253,12 +244,11 @@ struct CtxState {
     // interrupt is polled by the generation loop; its ADDRESS is handed to the
     // host so another thread can stop a running generation.
     uint32_t interrupt = 0;
-    // stream holds pieces decoded since the last llama_ctx_take_stream.
-    std::string stream;
-    bool        generating = false;
+    bool       generating = false;
     // state_buf backs llama_ctx_state_save: the host reads it straight out of
     // linear memory, so it must outlive the call.
     std::vector<uint8_t> state_buf;
+
 };
 
 // Process-wide bits. The error slot is thread_local so a wasi-threads agent
@@ -591,13 +581,11 @@ struct SamplingParams {
     uint32_t seed             = LLAMA_DEFAULT_SEED;
     std::string grammar;
     std::vector<std::string> stop;
-    bool    stream            = false;
 };
 
 SamplingParams parse_params(const char *json, size_t len) {
     SamplingParams sp;
     double d;
-    bool b;
     if (opt_num(json, len, "n_predict", d))         sp.n_predict         = (int32_t) d;
     if (opt_num(json, len, "temperature", d))       sp.temperature       = (float) d;
     if (opt_num(json, len, "top_k", d))             sp.top_k             = (int32_t) d;
@@ -611,7 +599,6 @@ SamplingParams parse_params(const char *json, size_t len) {
     if (opt_num(json, len, "seed", d))              sp.seed              = (uint32_t) d;
     opt_str(json, len, "grammar", sp.grammar);
     opt_str_array(json, len, "stop", sp.stop);
-    if (opt_bool(json, len, "stream", b))           sp.stream            = b;
     return sp;
 }
 
@@ -663,7 +650,8 @@ bool ends_with_stop(const std::string &text, const std::vector<std::string> &sto
 
 std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
                                uint32_t prompt_len, const char *params_json,
-                               uint32_t params_json_len) {
+                               uint32_t params_json_len,
+                               llama_wasm::token_sink *sink) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return json_err("null context handle");
 
@@ -688,7 +676,6 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
         smpl = build_sampler(vocab, sp);
         st->interrupt = 0;
         st->generating = true;
-        if (sp.stream) st->stream.clear();
 
         std::string text;
         std::vector<llama_token> produced;
@@ -705,7 +692,7 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
             }
             if (llama_decode(st->ctx, batch) != 0) {
                 st->generating = false;
-                llama_sampler_free(smpl);
+                        llama_sampler_free(smpl);
                 return json_err("generate: decode failed");
             }
             const llama_token tok = llama_sampler_sample(smpl, st->ctx, -1);
@@ -717,7 +704,7 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
             n_decoded++;
             const std::string piece = piece_of(vocab, tok, /*special=*/false);
             text += piece;
-            if (sp.stream) st->stream += piece;
+            if (sink != nullptr) sink->on_piece(piece);
 
             size_t trim = 0;
             if (ends_with_stop(text, sp.stop, trim)) {
@@ -754,15 +741,6 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
         if (smpl != nullptr) llama_sampler_free(smpl);
         return json_err("generate: unknown error");
     }
-}
-
-std::string llama_ctx_take_stream(uint64_t ctx) {
-    CtxState *st = ctx_of(ctx);
-    if (st == nullptr) return json_err("null context handle");
-    std::string chunk;
-    chunk.swap(st->stream);
-    return "{\"ok\":true,\"text\":" + json_str(chunk) + ",\"done\":" +
-           (st->generating ? "false" : "true") + "}";
 }
 
 std::string llama_chat_apply_template(uint64_t model, const char *messages_json,
