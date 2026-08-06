@@ -11,6 +11,7 @@
 #include "llama.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -408,6 +409,11 @@ std::string llama_model_info(uint64_t model) {
         out += ",\"n_vocab\":" + json_num(llama_vocab_n_tokens(vocab));
         out += ",\"has_encoder\":" + std::string(llama_model_has_encoder(st->model) ? "true" : "false");
         out += ",\"has_decoder\":" + std::string(llama_model_has_decoder(st->model) ? "true" : "false");
+        // Vocab landmarks; -1 when the model defines none
+        // (LLAMA_TOKEN_NULL), so callers need no sentinel knowledge.
+        out += ",\"bos_token\":" + json_num(llama_vocab_bos(vocab));
+        out += ",\"eos_token\":" + json_num(llama_vocab_eos(vocab));
+        out += ",\"add_bos\":" + std::string(llama_vocab_get_add_bos(vocab) ? "true" : "false");
         const char *tmpl = llama_model_chat_template(st->model, nullptr);
         out += ",\"chat_template\":" + json_str(tmpl != nullptr ? tmpl : "");
         out += "}";
@@ -421,6 +427,78 @@ std::string llama_model_info(uint64_t model) {
 
 uint32_t llama_model_load_progress_addr() {
     return (uint32_t) (uintptr_t) &g_load_progress;
+}
+
+/* ------------------------------------------------------------------- lora */
+
+uint64_t llama_lora_load(uint64_t model, const char *path, uint32_t path_len) {
+    set_error("");
+    ModelState *ms = model_of(model);
+    if (ms == nullptr) {
+        set_error("null model handle");
+        return 0;
+    }
+    try {
+        const std::string p(path, path_len);
+        llama_adapter_lora *a = llama_adapter_lora_init(ms->model, p.c_str());
+        if (a == nullptr) {
+            set_error("lora_load: failed to load " + p);
+            return 0;
+        }
+        return reinterpret_cast<uint64_t>(a);
+    } catch (const std::exception &e) {
+        set_error(std::string("lora_load: ") + e.what());
+        return 0;
+    } catch (...) {
+        set_error("lora_load: unknown error");
+        return 0;
+    }
+}
+
+void llama_lora_free(uint64_t adapter) {
+    if (adapter == 0) return;
+    llama_adapter_lora_free(reinterpret_cast<llama_adapter_lora *>(adapter));
+}
+
+/* Set the FULL adapter configuration of a context: `adapters_json` is
+ * `[[adapter_handle,scale],...]`, and an empty array clears every
+ * adapter. Set-everything rather than add/remove because that is
+ * llama.cpp's own API shape (llama_set_adapters_lora). */
+std::string llama_ctx_lora_set(uint64_t ctx, const char *adapters_json,
+                               uint32_t adapters_json_len) {
+    CtxState *st = ctx_of(ctx);
+    if (st == nullptr) return json_err("null context handle");
+    try {
+        std::vector<llama_adapter_lora *> adapters;
+        std::vector<float> scales;
+        JsonReader r(adapters_json, adapters_json_len);
+        if (!r.eat('[')) return json_err("lora_set: expected a JSON array");
+        if (!r.eat(']')) {
+            for (;;) {
+                double handle = 0, scale = 0;
+                if (!r.eat('[') || !r.num(handle) || !r.eat(',') ||
+                    !r.num(scale) || !r.eat(']')) {
+                    return json_err("lora_set: expected [adapter,scale] pairs");
+                }
+                auto *a = reinterpret_cast<llama_adapter_lora *>((uint64_t) handle);
+                if (a == nullptr) return json_err("lora_set: null adapter handle");
+                adapters.push_back(a);
+                scales.push_back((float) scale);
+                if (r.eat(',')) continue;
+                if (!r.eat(']')) return json_err("lora_set: unterminated array");
+                break;
+            }
+        }
+        if (llama_set_adapters_lora(st->ctx, adapters.data(), adapters.size(),
+                                    scales.data()) != 0) {
+            return json_err("lora_set: engine rejected the adapter set");
+        }
+        return "{\"ok\":true}";
+    } catch (const std::exception &e) {
+        return json_err(std::string("lora_set: ") + e.what());
+    } catch (...) {
+        return json_err("lora_set: unknown error");
+    }
 }
 
 /* ---------------------------------------------------------------- context */
@@ -805,6 +883,7 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
         const int nb = (int) llama_n_batch(st->ctx);
         int n_decoded = 0;
         bool prompt_ok = true;
+        const auto t_start = std::chrono::steady_clock::now();
         for (int off = 0; off < n_prompt && !interrupted; off += nb) {
             if (st->interrupt != 0) {
                 interrupted = true;
@@ -822,6 +901,7 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
             llama_sampler_free(smpl);
             return json_err("generate: decode failed");
         }
+        const auto t_prompt = std::chrono::steady_clock::now();
         for (int i = 0; i < budget && !interrupted; i++) {
             const llama_token tok = llama_sampler_sample(smpl, st->ctx, -1);
             if (llama_vocab_is_eog(vocab, tok)) {
@@ -871,6 +951,12 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
         out += ",\"n_decoded\":" + json_num(n_decoded);
         out += ",\"stop_reason\":" + json_str(stop_reason);
         out += ",\"interrupted\":" + std::string(interrupted ? "true" : "false");
+        const auto t_end = std::chrono::steady_clock::now();
+        const auto ms = [](std::chrono::steady_clock::duration d) {
+            return std::chrono::duration<double, std::milli>(d).count();
+        };
+        out += ",\"timings\":{\"prompt_ms\":" + json_num(ms(t_prompt - t_start)) +
+               ",\"decode_ms\":" + json_num(ms(t_end - t_prompt)) + "}";
         out += "}";
         return out;
     } catch (const std::exception &e) {
@@ -958,6 +1044,249 @@ std::string llama_chat_apply_template(uint64_t model, const char *messages_json,
         return json_err(std::string("chat_apply_template: ") + e.what());
     } catch (...) {
         return json_err("chat_apply_template: unknown error");
+    }
+}
+
+std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
+                                           const char *prompt,
+                                           uint32_t prompt_len,
+                                           const char *params_json,
+                                           uint32_t params_json_len,
+                                           int32_t n_draft,
+                                           llama_wasm::token_sink *sink) {
+    CtxState *st = ctx_of(ctx);
+    CtxState *ds = ctx_of(draft_ctx);
+    if (st == nullptr || ds == nullptr) return json_err("null context handle");
+    if (st == ds) return json_err("speculative: target and draft must be distinct contexts");
+
+    llama_sampler *smpl = nullptr;
+    llama_sampler *dsmpl = nullptr;
+    llama_batch vb = {};
+    bool vb_init = false;
+    // Every error path funnels through fail() so the samplers, the batch
+    // and the generating flag can never leak.
+    auto fail = [&](const std::string &msg) {
+        st->generating = false;
+        if (smpl != nullptr) llama_sampler_free(smpl);
+        if (dsmpl != nullptr) llama_sampler_free(dsmpl);
+        if (vb_init) llama_batch_free(vb);
+        return json_err(msg);
+    };
+    try {
+        const SamplingParams sp = parse_params(params_json, params_json_len);
+        const llama_vocab *vocab  = llama_model_get_vocab(st->model);
+        const llama_vocab *dvocab = llama_model_get_vocab(ds->model);
+        if (llama_vocab_n_tokens(vocab) != llama_vocab_n_tokens(dvocab)) {
+            return json_err("speculative: target and draft vocabularies differ");
+        }
+        if (n_draft <= 0) n_draft = 8;
+
+        std::vector<llama_token> toks;
+        std::string err;
+        if (!tokenize_text(vocab, std::string(prompt, prompt_len),
+                           /*add_special=*/true, /*parse_special=*/true, toks, err)) {
+            return json_err(err);
+        }
+        const int n_prompt = (int) toks.size();
+        if (n_prompt == 0) return json_err("generate: empty prompt");
+
+        const int n_ctx = (int) llama_n_ctx(st->ctx);
+        int budget = sp.n_predict < 0 ? n_ctx - n_prompt : sp.n_predict;
+        if (budget < 0) budget = 0;
+
+        smpl = build_sampler(vocab, sp);
+        // The draft always proposes greedily: correctness never depends on
+        // it, because every emitted token is sampled by the target's own
+        // chain — the draft only decides how much verification batches up.
+        llama_sampler_chain_params dcp = llama_sampler_chain_default_params();
+        dcp.no_perf = true;
+        dsmpl = llama_sampler_chain_init(dcp);
+        llama_sampler_chain_add(dsmpl, llama_sampler_init_greedy());
+
+        st->interrupt = 0;
+        st->generating = true;
+
+        // Self-contained: both caches restart from the prompt, keeping the
+        // two sequences aligned by construction.
+        llama_memory_clear(llama_get_memory(st->ctx), true);
+        llama_memory_clear(llama_get_memory(ds->ctx), true);
+
+        auto prefill = [&](CtxState *cs) -> bool {
+            const int nb = (int) llama_n_batch(cs->ctx);
+            for (int off = 0; off < n_prompt; off += nb) {
+                const int take = std::min(nb, n_prompt - off);
+                if (llama_decode(cs->ctx, llama_batch_get_one(toks.data() + off, take)) != 0) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        const auto t_start = std::chrono::steady_clock::now();
+        if (!prefill(st) || !prefill(ds)) return fail("generate: decode failed");
+        const auto t_prompt = std::chrono::steady_clock::now();
+
+        std::string text;
+        std::vector<llama_token> produced;
+        const char *stop_reason = "length";
+        bool interrupted = false;
+        int n_drafted = 0, n_accepted = 0;
+        int tpos = n_prompt; // target KV length in tokens
+        int dpos = n_prompt; // draft KV length in tokens
+
+        vb = llama_batch_init(n_draft + 1, 0, 1);
+        vb_init = true;
+
+        bool done = budget == 0;
+        // emit appends one target-sampled token to the result; false means
+        // generation must stop here (stop string or budget).
+        auto emit = [&](llama_token tok) -> bool {
+            produced.push_back(tok);
+            const std::string piece = piece_of(vocab, tok, /*special=*/false);
+            const size_t piece_start = text.size();
+            text += piece;
+            if (sink != nullptr) sink->on_piece(piece);
+            size_t cut = 0;
+            if (find_stop(text, sp.stop, piece_start, cut)) {
+                text.resize(cut);
+                stop_reason = "stop";
+                return false;
+            }
+            return (int) produced.size() < budget;
+        };
+
+        // pending: the last emitted token, in neither KV cache yet. The
+        // target decodes it at the head of the next verification batch.
+        llama_token pending = 0;
+        if (!done) {
+            pending = llama_sampler_sample(smpl, st->ctx, -1);
+            if (llama_vocab_is_eog(vocab, pending)) {
+                stop_reason = "eos";
+                done = true;
+            } else if (!emit(pending)) {
+                done = true;
+            }
+        }
+
+        while (!done) {
+            if (st->interrupt != 0) {
+                interrupted = true;
+                stop_reason = "interrupted";
+                break;
+            }
+            // Catch the draft up: drop any rejected drafts from its cache,
+            // then feed it the pending token.
+            if (dpos > tpos) {
+                llama_memory_seq_rm(llama_get_memory(ds->ctx), 0, tpos, -1);
+                dpos = tpos;
+            }
+            llama_token feed = pending;
+            if (llama_decode(ds->ctx, llama_batch_get_one(&feed, 1)) != 0) {
+                return fail("generate: draft decode failed");
+            }
+            dpos++;
+
+            // Propose up to k greedy continuations. A draft EOG proposal
+            // just ends the round early — whether generation ends is the
+            // target's call, on its own logits.
+            int k = std::min(n_draft, budget - (int) produced.size());
+            k = std::min(k, n_ctx - tpos - 1);
+            if (k < 0) k = 0;
+            std::vector<llama_token> drafts;
+            for (int j = 0; j < k; j++) {
+                const llama_token d = llama_sampler_sample(dsmpl, ds->ctx, -1);
+                if (llama_vocab_is_eog(dvocab, d)) break;
+                drafts.push_back(d);
+                llama_token dc = d;
+                if (llama_decode(ds->ctx, llama_batch_get_one(&dc, 1)) != 0) {
+                    return fail("generate: draft decode failed");
+                }
+                dpos++;
+            }
+            n_drafted += (int) drafts.size();
+
+            // Verify in ONE target batch: pending + the drafts, logits at
+            // every position.
+            vb.n_tokens = 1 + (int) drafts.size();
+            for (int j = 0; j < vb.n_tokens; j++) {
+                vb.token[j]     = j == 0 ? pending : drafts[(size_t) (j - 1)];
+                vb.pos[j]       = tpos + j;
+                vb.n_seq_id[j]  = 1;
+                vb.seq_id[j][0] = 0;
+                vb.logits[j]    = true;
+            }
+            const int base = tpos;
+            if (llama_decode(st->ctx, vb) != 0) {
+                return fail("generate: decode failed");
+            }
+            tpos += vb.n_tokens;
+
+            // Walk the verification logits: logits[i] condition on
+            // [.., pending, drafts[0..i-1]]. Accept while the target's own
+            // sample agrees with the draft; the first disagreement (or the
+            // bonus sample past the last draft) becomes the next pending.
+            for (size_t i = 0; !done && i <= drafts.size(); i++) {
+                const llama_token t = llama_sampler_sample(smpl, st->ctx, (int32_t) i);
+                const bool keep = i < drafts.size() && t == drafts[i];
+                if (keep) {
+                    n_accepted++;
+                } else if (i < drafts.size()) {
+                    // Rejected from drafts[i] on: the accepted prefix stays,
+                    // the tail leaves the target cache.
+                    llama_memory_seq_rm(llama_get_memory(st->ctx), 0,
+                                        base + 1 + (llama_pos) i, -1);
+                    tpos = base + 1 + (int) i;
+                }
+                if (llama_vocab_is_eog(vocab, t)) {
+                    stop_reason = "eos";
+                    done = true;
+                    break;
+                }
+                if (!emit(t)) {
+                    done = true;
+                    break;
+                }
+                if (!keep) {
+                    // The disagreeing sample — or the bonus sample past a
+                    // fully accepted run — is the next round's pending.
+                    pending = t;
+                    break;
+                }
+            }
+        }
+        st->generating = false;
+        llama_sampler_free(smpl);
+        smpl = nullptr;
+        llama_sampler_free(dsmpl);
+        dsmpl = nullptr;
+        llama_batch_free(vb);
+        vb_init = false;
+
+        std::string out = "{\"ok\":true";
+        out += ",\"text\":" + json_str(text);
+        out += ",\"tokens\":[";
+        for (size_t i = 0; i < produced.size(); i++) {
+            if (i != 0) out.push_back(',');
+            out += json_num(produced[i]);
+        }
+        out += "]";
+        out += ",\"n_prompt\":" + json_num(n_prompt);
+        out += ",\"n_decoded\":" + json_num((double) produced.size());
+        out += ",\"n_drafted\":" + json_num(n_drafted);
+        out += ",\"n_accepted\":" + json_num(n_accepted);
+        out += ",\"stop_reason\":" + json_str(stop_reason);
+        out += ",\"interrupted\":" + std::string(interrupted ? "true" : "false");
+        const auto t_end = std::chrono::steady_clock::now();
+        const auto ms = [](std::chrono::steady_clock::duration d) {
+            return std::chrono::duration<double, std::milli>(d).count();
+        };
+        out += ",\"timings\":{\"prompt_ms\":" + json_num(ms(t_prompt - t_start)) +
+               ",\"decode_ms\":" + json_num(ms(t_end - t_prompt)) + "}";
+        out += "}";
+        return out;
+    } catch (const std::exception &e) {
+        return fail(std::string("generate: ") + e.what());
+    } catch (...) {
+        return fail("generate: unknown error");
     }
 }
 
