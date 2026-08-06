@@ -178,6 +178,39 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
                                llama_wasm::token_sink *sink);
 
 
+/* llama_ctx_generate_speculative is llama_ctx_generate accelerated by a
+ * draft context over a smaller model with the SAME vocabulary: the draft
+ * proposes up to `n_draft` greedy tokens per round (0 = a default) and the
+ * target verifies them in one batch, emitting only tokens its own sampler
+ * chain picked — the output distribution is exactly the target's, the
+ * draft only shifts decode work into larger batches.
+ *
+ * Self-contained: both contexts' caches restart from the prompt. The
+ * response is llama_ctx_generate's plus `"n_drafted"` / `"n_accepted"`,
+ * the speculation efficiency counters. */
+std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
+                                           const char *prompt,
+                                           uint32_t prompt_len,
+                                           const char *params_json,
+                                           uint32_t params_json_len,
+                                           int32_t n_draft,
+                                           llama_wasm::token_sink *sink);
+
+/* -------------------------------------------------------------------- lora */
+
+/* Load a LoRA adapter GGUF for `model`. Returns an adapter handle, or 0
+ * (see llama_wasm_last_error). The adapter must not outlive its model. */
+uint64_t llama_lora_load(uint64_t model, const char *path, uint32_t path_len);
+
+/* Free a loaded adapter. Adapters still set on a context must be cleared
+ * (llama_ctx_lora_set with an empty array) first. */
+void llama_lora_free(uint64_t adapter);
+
+/* Set the FULL adapter configuration of a context: `adapters_json` is
+ * `[[adapter_handle,scale],...]`; an empty array clears every adapter. */
+std::string llama_ctx_lora_set(uint64_t ctx, const char *adapters_json,
+                               uint32_t adapters_json_len);
+
 /* Apply the model's chat template to `messages_json`
  * (`[{"role":"user","content":"hi"}, ...]`) and return the prompt string:
  * `{"ok":true,"prompt":"..."}`. `add_assistant` appends the generation
