@@ -78,16 +78,19 @@ uint32_t llama_model_load_progress_addr();
 
 /* ---------------------------------------------------------------- context */
 
-/* Create a context over `model`.
+/* Create a context over `model`. `params_json` carries the context
+ * parameters; absent fields take llama.cpp's defaults:
  *
- * `n_ctx` 0 means "the model's training context length". `n_batch` /
- * `n_ubatch` 0 mean llama.cpp's defaults. `n_threads` 0 means 1 (a
- * single-threaded wasm build ignores anything else; a threads build uses it).
- * `embeddings` non-zero puts the context in embedding mode. `seed` seeds the
- * default sampler chain; 0 means a fixed, reproducible seed. */
-uint64_t llama_ctx_new(uint64_t model, uint32_t n_ctx, uint32_t n_batch,
-                       uint32_t n_ubatch, uint32_t n_threads,
-                       int32_t embeddings, uint32_t seed);
+ *   n_ctx           0 = the model's training context length
+ *   n_batch         logical batch size
+ *   n_ubatch        physical batch size
+ *   n_threads       0 = 1; a single-threaded wasm build clamps to 1
+ *   embeddings      non-zero puts the context in embedding mode
+ *   rope_freq_base  RoPE base frequency override (0 = model default)
+ *   rope_freq_scale RoPE frequency scaling override (0 = model default)
+ */
+uint64_t llama_ctx_new(uint64_t model, const char *params_json,
+                       uint32_t params_json_len);
 
 /* Free a context. */
 void llama_ctx_free(uint64_t ctx);
@@ -158,7 +161,14 @@ public:
  *    "temperature":float, "top_k":int, "top_p":float, "min_p":float,
  *    "typical_p":float, "repeat_penalty":float, "repeat_last_n":int,
  *    "presence_penalty":float, "frequency_penalty":float,
- *    "seed":uint, "grammar":"...", "stop":["..",".."]}
+ *    "seed":uint, "grammar":"...", "stop":["..",".."],
+ *    "mirostat":int,            // 0 off, 1 v1, 2 v2; replaces the
+ *    "mirostat_tau":float,      // truncation samplers when set
+ *    "mirostat_eta":float,
+ *    "ignore_eos":int,          // non-zero: end-of-generation tokens
+ *                               // are excluded from sampling
+ *    "logit_bias":[[token,bias],..]} // added to those tokens' logits;
+ *                               // -inf forbids a token outright
  *
  * `sink`, when non-null, receives each piece as it is decoded — see
  * llama_wasm::token_sink. The result is the same either way. */
@@ -197,7 +207,20 @@ std::string llama_ctx_score(uint64_t ctx, const char *text, uint32_t text_len);
 std::string llama_ctx_embed(uint64_t ctx, const char *text, uint32_t text_len,
                             int32_t normalize);
 
+/* Embed from token ids (a JSON array of ints) instead of text — the
+ * token-level twin of llama_ctx_embed, same response shape. */
+std::string llama_ctx_embed_tokens(uint64_t ctx, const char *tokens_json,
+                                   uint32_t tokens_json_len, int32_t normalize);
+
 /* ------------------------------------------------------------- kv / state */
+
+/* Decode `text` into the context's KV cache without sampling anything —
+ * prompt prefill for a later llama_ctx_generate, or plain evaluation.
+ * Positions continue from the cache's current end; llama_ctx_reset
+ * starts over. Returns `{"ok":true,"n_tokens":N,"n_past":N}` where
+ * n_past is the total sequence length now cached. */
+std::string llama_ctx_eval(uint64_t ctx, const char *text, uint32_t text_len,
+                           int32_t add_special, int32_t parse_special);
 
 /* Drop the context's KV cache so the next generation starts fresh. */
 void llama_ctx_reset(uint64_t ctx);
@@ -208,9 +231,11 @@ void llama_ctx_reset(uint64_t ctx);
  * next state call on this context. */
 std::string llama_ctx_state_save(uint64_t ctx);
 
-/* Restore a context state previously produced by llama_ctx_state_save, read
- * from `size` bytes at linear-memory address `addr`. */
-std::string llama_ctx_state_load(uint64_t ctx, uint32_t addr, uint32_t size);
+/* Restore a context state previously produced by llama_ctx_state_save.
+ * `data` carries the serialized bytes (the bridge copies them into
+ * linear memory; they may contain NUL bytes). */
+std::string llama_ctx_state_load(uint64_t ctx, const char *data,
+                                 uint32_t size);
 
 /* ------------------------------------------------------------------ error */
 
