@@ -133,11 +133,37 @@ tools:
 #   .wasmify/wasm-build/output/llama.wasm
 #   build/wasm2go/                                <- wasm2go bridge + bundle
 #   build/wasm2go/internal/wasm2go/go.mod         <- bundle module manifest
+# Transpiler tuning for the wasm2go bundle. These reach the
+# protoc-gen-wasmify-go transpile step through the container
+# environment. WASM2GO_F16_TABLE asserts the address of ggml's
+# runtime-built f16 table (required for the f16 gather rewrite —
+# without it that optimization silently stays off); the rest match
+# the measured production configuration. Override on the make
+# command line to build variants (e.g. WASM2GO_FAST_MATH=).
+#
+# The table address MOVES whenever the wasm's data layout shifts
+# (any bridge or llama.cpp change). After a rebuild, re-derive it
+# from the transpiled output — the f16 gather sites compute
+# `extract_lane(...)<<2 + <base>`, so the base is the dominant
+# 7-digit int32 constant in the bundle:
+#   grep -oh 'int32(9[0-9]\{6\})' build/wasm2go/internal/wasm2go/p0/p0_pure.go | sort | uniq -c | sort -rn | head -3
+# wasm2go warns at transpile time when the asserted address
+# matches no gather site.
+WASM2GO_F16_TABLE ?= 9013472
+WASM2GO_ENV ?= \
+	-e WASM2GO_OUTLINE=100 \
+	-e WASM2GO_UNROLL=4 \
+	-e WASM2GO_FUSE_LOOP=1 \
+	-e WASM2GO_FUSE_LOOP_UNROLL=4 \
+	-e WASM2GO_F16_TABLE=$(WASM2GO_F16_TABLE) \
+	-e WASM2GO_FAST_MATH=$(WASM2GO_FAST_MATH)
+WASM2GO_FAST_MATH ?= 1
+
 wasm:
 	$(CONTAINER) run --rm $(PLATFORM_FLAG) \
 		-v $(CURDIR):/work $(WASMIFY_SRC_MOUNT) $(WASM2GO_SRC_MOUNT) -w /work \
 		--memory=$(MEMORY) --cpus=$(CPUS) \
-		-e WASMIFY_NON_INTERACTIVE=1 \
+		-e WASMIFY_NON_INTERACTIVE=1 $(WASM2GO_ENV) \
 		$(IMAGE) \
 		bash -c '$(WASMIFY_PIPELINE)$(WASM2GO_UNREPLACE)'
 

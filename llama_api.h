@@ -184,6 +184,16 @@ std::string llama_chat_apply_template(uint64_t model, const char *messages_json,
 /* Embed `text` with a context created with embeddings=1 and return
  * `{"ok":true,"embedding":[..],"n_embd":N}`. `normalize` applies L2
  * normalisation (2 = euclidean, 0 = none), matching llama.cpp's convention. */
+/**
+ * llama_ctx_score computes the teacher-forced negative log-likelihood of
+ * `text`: tokenize (add_special, parse_special), decode once with logits at
+ * every predicting position, and sum -log softmax(logits_i)[token_{i+1}].
+ * Returns `{"ok":true,"n_tokens":N,"n_scored":N-1,"nll":X}`. The float-
+ * tolerant compatibility gate compares this against native llama.cpp
+ * perplexity on the same text.
+ */
+std::string llama_ctx_score(uint64_t ctx, const char *text, uint32_t text_len);
+
 std::string llama_ctx_embed(uint64_t ctx, const char *text, uint32_t text_len,
                             int32_t normalize);
 

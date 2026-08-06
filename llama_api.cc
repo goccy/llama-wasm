@@ -61,6 +61,34 @@ std::string json_str(const std::string &s) {
     return out;
 }
 
+std::string b64_encode(const std::string &in) {
+    static const char tab[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(((in.size() + 2) / 3) * 4);
+    size_t i = 0;
+    for (; i + 3 <= in.size(); i += 3) {
+        uint32_t v = (uint8_t) in[i] << 16 | (uint8_t) in[i + 1] << 8 | (uint8_t) in[i + 2];
+        out.push_back(tab[v >> 18]);
+        out.push_back(tab[(v >> 12) & 63]);
+        out.push_back(tab[(v >> 6) & 63]);
+        out.push_back(tab[v & 63]);
+    }
+    if (i + 1 == in.size()) {
+        uint32_t v = (uint8_t) in[i] << 16;
+        out.push_back(tab[v >> 18]);
+        out.push_back(tab[(v >> 12) & 63]);
+        out += "==";
+    } else if (i + 2 == in.size()) {
+        uint32_t v = (uint8_t) in[i] << 16 | (uint8_t) in[i + 1] << 8;
+        out.push_back(tab[v >> 18]);
+        out.push_back(tab[(v >> 12) & 63]);
+        out.push_back(tab[(v >> 6) & 63]);
+        out.push_back('=');
+    }
+    return out;
+}
+
 std::string json_num(double v) {
     char buf[64];
     if (v == (double) (long long) v && std::fabs(v) < 1e15) {
@@ -554,8 +582,12 @@ std::string llama_token_to_piece(uint64_t model, int32_t token,
     if (ms == nullptr) return json_err("null model handle");
     try {
         const llama_vocab *vocab = llama_model_get_vocab(ms->model);
-        return "{\"ok\":true,\"text\":" +
-               json_str(piece_of(vocab, (llama_token) token, render_special != 0)) + "}";
+        const std::string piece = piece_of(vocab, (llama_token) token, render_special != 0);
+        // A byte-fallback token holds a PARTIAL UTF-8 sequence, which
+        // a JSON string cannot carry losslessly; b64 carries the raw
+        // bytes, text stays for older consumers.
+        return "{\"ok\":true,\"text\":" + json_str(piece) +
+               ",\"b64\":\"" + b64_encode(piece) + "\"}";
     } catch (const std::exception &e) {
         return json_err(std::string("token_to_piece: ") + e.what());
     } catch (...) {
@@ -632,18 +664,25 @@ llama_sampler *build_sampler(const llama_vocab *vocab, const SamplingParams &sp)
     return chain;
 }
 
-// ends_with_stop reports whether `text` ends with any stop string, and by how
-// many bytes it must be trimmed.
-bool ends_with_stop(const std::string &text, const std::vector<std::string> &stops,
-                    size_t &trim) {
+// find_stop looks for the FIRST occurrence of any stop string at or
+// after the piece that begins at piece_start — including a match that
+// spans the piece boundary — and reports the byte offset the text
+// must be cut at. This mirrors llama.cpp's server semantics (cut at
+// the first occurrence anywhere), not just a piece-suffix match.
+bool find_stop(const std::string &text, const std::vector<std::string> &stops,
+               size_t piece_start, size_t &cut) {
+    bool found = false;
     for (const auto &s : stops) {
-        if (!s.empty() && text.size() >= s.size() &&
-            text.compare(text.size() - s.size(), s.size(), s) == 0) {
-            trim = s.size();
-            return true;
+        if (s.empty()) continue;
+        const size_t back = s.size() - 1;
+        const size_t from = piece_start > back ? piece_start - back : 0;
+        const size_t p = text.find(s, from);
+        if (p != std::string::npos && (!found || p < cut)) {
+            cut = p;
+            found = true;
         }
     }
-    return false;
+    return found;
 }
 
 } // namespace
@@ -715,12 +754,13 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
             produced.push_back(tok);
             n_decoded++;
             const std::string piece = piece_of(vocab, tok, /*special=*/false);
+            const size_t piece_start = text.size();
             text += piece;
             if (sink != nullptr) sink->on_piece(piece);
 
-            size_t trim = 0;
-            if (ends_with_stop(text, sp.stop, trim)) {
-                text.resize(text.size() - trim);
+            size_t cut = 0;
+            if (find_stop(text, sp.stop, piece_start, cut)) {
+                text.resize(cut);
                 stop_reason = "stop";
                 break;
             }
@@ -841,6 +881,69 @@ std::string llama_chat_apply_template(uint64_t model, const char *messages_json,
         return json_err(std::string("chat_apply_template: ") + e.what());
     } catch (...) {
         return json_err("chat_apply_template: unknown error");
+    }
+}
+
+/* ------------------------------------------------------------------ score */
+
+std::string llama_ctx_score(uint64_t ctx, const char *text, uint32_t text_len) {
+    CtxState *st = ctx_of(ctx);
+    if (st == nullptr) return json_err("null context handle");
+    try {
+        const llama_vocab *vocab = llama_model_get_vocab(st->model);
+        std::vector<llama_token> toks;
+        std::string err;
+        if (!tokenize_text(vocab, std::string(text, text_len), true, true, toks, err)) {
+            return json_err(err);
+        }
+        const int n = (int) toks.size();
+        if (n < 2) return json_err("score: need at least two tokens");
+        const int n_ctx = (int) llama_n_ctx(st->ctx);
+        if (n > n_ctx) return json_err("score: text exceeds the context window");
+
+        llama_memory_clear(llama_get_memory(st->ctx), true);
+        llama_batch batch = llama_batch_init(n, 0, 1);
+        for (int i = 0; i < n; i++) {
+            batch.token[i]     = toks[i];
+            batch.pos[i]       = i;
+            batch.n_seq_id[i]  = 1;
+            batch.seq_id[i][0] = 0;
+            // Logits are needed at every position that PREDICTS a
+            // following token (teacher forcing).
+            batch.logits[i]    = i + 1 < n;
+        }
+        batch.n_tokens = n;
+        const int rc = llama_decode(st->ctx, batch);
+        llama_batch_free(batch);
+        if (rc != 0) return json_err("score: decode failed");
+
+        const int n_vocab = llama_vocab_n_tokens(vocab);
+        double nll = 0.0;
+        for (int i = 0; i + 1 < n; i++) {
+            const float *logits = llama_get_logits_ith(st->ctx, i);
+            if (logits == nullptr) return json_err("score: no logits");
+            float maxv = logits[0];
+            for (int v = 1; v < n_vocab; v++) {
+                if (logits[v] > maxv) maxv = logits[v];
+            }
+            double sum = 0.0;
+            for (int v = 0; v < n_vocab; v++) {
+                sum += std::exp((double) logits[v] - (double) maxv);
+            }
+            const double logprob =
+                (double) logits[toks[i + 1]] - (double) maxv - std::log(sum);
+            nll -= logprob;
+        }
+        std::string out = "{\"ok\":true";
+        out += ",\"n_tokens\":" + json_num(n);
+        out += ",\"n_scored\":" + json_num(n - 1);
+        out += ",\"nll\":" + json_num(nll);
+        out += "}";
+        return out;
+    } catch (const std::exception &e) {
+        return json_err(std::string("score: ") + e.what());
+    } catch (...) {
+        return json_err("score: unknown error");
     }
 }
 
