@@ -149,7 +149,7 @@ tools:
 #   grep -oh 'int32(9[0-9]\{6\})' build/wasm2go/internal/wasm2go/p0/p0_pure.go | sort | uniq -c | sort -rn | head -3
 # wasm2go warns at transpile time when the asserted address
 # matches no gather site.
-WASM2GO_F16_TABLE ?= 9013472
+WASM2GO_F16_TABLE ?= 9014096
 WASM2GO_ENV ?= \
 	-e WASM2GO_OUTLINE=100 \
 	-e WASM2GO_UNROLL=4 \

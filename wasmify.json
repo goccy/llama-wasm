@@ -122,6 +122,8 @@
       "llama_wasm::token_sink",
       "llama_chat_apply_template",
       "llama_ctx_embed",
+      "llama_ctx_eval",
+      "llama_ctx_embed_tokens",
       "llama_ctx_reset",
       "llama_ctx_state_save",
       "llama_ctx_state_load"
@@ -157,7 +159,7 @@
   },
   "phases": {
     "gen-proto": {
-      "completed_at": "2026-08-06T07:47:04Z",
+      "completed_at": "2026-08-06T08:24:23Z",
       "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
       "output_files": [
         "proto/llama.proto",
@@ -167,7 +169,7 @@
       ]
     },
     "parse-headers": {
-      "completed_at": "2026-08-06T07:47:04Z",
+      "completed_at": "2026-08-06T08:24:23Z",
       "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
       "output_files": [
         "api-spec.json"

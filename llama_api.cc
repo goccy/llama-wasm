@@ -425,9 +425,8 @@ uint32_t llama_model_load_progress_addr() {
 
 /* ---------------------------------------------------------------- context */
 
-uint64_t llama_ctx_new(uint64_t model, uint32_t n_ctx, uint32_t n_batch,
-                       uint32_t n_ubatch, uint32_t n_threads,
-                       int32_t embeddings, uint32_t seed) {
+uint64_t llama_ctx_new(uint64_t model, const char *params_json,
+                       uint32_t params_json_len) {
     set_error("");
     ModelState *ms = model_of(model);
     if (ms == nullptr) {
@@ -435,22 +434,31 @@ uint64_t llama_ctx_new(uint64_t model, uint32_t n_ctx, uint32_t n_batch,
         return 0;
     }
     try {
+        const char *json = params_json;
+        const size_t len = params_json_len;
         llama_context_params cp = llama_context_default_params();
-        if (n_ctx    != 0) cp.n_ctx    = n_ctx;
-        if (n_batch  != 0) cp.n_batch  = n_batch;
-        if (n_ubatch != 0) cp.n_ubatch = n_ubatch;
+        double d;
+        if (opt_num(json, len, "n_ctx", d)    && d != 0) cp.n_ctx    = (uint32_t) d;
+        if (opt_num(json, len, "n_batch", d)  && d != 0) cp.n_batch  = (uint32_t) d;
+        if (opt_num(json, len, "n_ubatch", d) && d != 0) cp.n_ubatch = (uint32_t) d;
         // A single-threaded wasm build has no usable pthread_create: ggml
         // asserts if asked for more than one thread, so clamp rather than
         // trap. A threads build honours the request.
+        int32_t n_threads = 0;
+        if (opt_num(json, len, "n_threads", d)) n_threads = (int32_t) d;
 #if defined(_REENTRANT)
-        cp.n_threads       = n_threads != 0 ? (int32_t) n_threads : 1;
+        cp.n_threads       = n_threads != 0 ? n_threads : 1;
         cp.n_threads_batch = cp.n_threads;
 #else
         (void) n_threads;
         cp.n_threads       = 1;
         cp.n_threads_batch = 1;
 #endif
-        cp.embeddings = embeddings != 0;
+        if (opt_num(json, len, "embeddings", d)) cp.embeddings = d != 0;
+        // 0 keeps the model's own RoPE configuration, llama.cpp's
+        // convention for these two.
+        if (opt_num(json, len, "rope_freq_base", d))  cp.rope_freq_base  = (float) d;
+        if (opt_num(json, len, "rope_freq_scale", d)) cp.rope_freq_scale = (float) d;
 
         llama_context *c = llama_init_from_model(ms->model, cp);
         if (c == nullptr) {
@@ -460,7 +468,6 @@ uint64_t llama_ctx_new(uint64_t model, uint32_t n_ctx, uint32_t n_batch,
         auto *st = new CtxState();
         st->ctx   = c;
         st->model = ms->model;
-        (void) seed; // the sampler chain seeds per generation
         return reinterpret_cast<uint64_t>(st);
     } catch (const std::exception &e) {
         set_error(std::string("ctx_new: ") + e.what());
@@ -611,9 +618,39 @@ struct SamplingParams {
     float   presence_penalty  = 0.0f;
     float   frequency_penalty = 0.0f;
     uint32_t seed             = LLAMA_DEFAULT_SEED;
+    int32_t mirostat          = 0;    // 0 off, 1 v1, 2 v2
+    float   mirostat_tau      = 5.0f;
+    float   mirostat_eta      = 0.1f;
+    bool    ignore_eos        = false;
+    std::vector<llama_logit_bias> logit_bias;
     std::string grammar;
     std::vector<std::string> stop;
 };
+
+// opt_bias_array parses `"key":[[token,bias],...]` — the wire form of
+// logit biases. A malformed array fails the parse and leaves `out`
+// empty rather than half-filled.
+bool opt_bias_array(const char *json, size_t len, const char *key,
+                    std::vector<llama_logit_bias> &out) {
+    JsonReader r(nullptr, 0);
+    if (!find_member(json, len, key, r)) return false;
+    std::vector<llama_logit_bias> parsed;
+    if (!r.eat('[')) return false;
+    if (r.eat(']')) { out = parsed; return true; }
+    for (;;) {
+        double tok = 0, bias = 0;
+        if (!r.eat('[') || !r.num(tok) || !r.eat(',') || !r.num(bias) ||
+            !r.eat(']')) {
+            return false;
+        }
+        parsed.push_back({(llama_token) tok, (float) bias});
+        if (r.eat(',')) continue;
+        if (!r.eat(']')) return false;
+        break;
+    }
+    out = parsed;
+    return true;
+}
 
 SamplingParams parse_params(const char *json, size_t len) {
     SamplingParams sp;
@@ -629,6 +666,11 @@ SamplingParams parse_params(const char *json, size_t len) {
     if (opt_num(json, len, "presence_penalty", d))  sp.presence_penalty  = (float) d;
     if (opt_num(json, len, "frequency_penalty", d)) sp.frequency_penalty = (float) d;
     if (opt_num(json, len, "seed", d))              sp.seed              = (uint32_t) d;
+    if (opt_num(json, len, "mirostat", d))          sp.mirostat          = (int32_t) d;
+    if (opt_num(json, len, "mirostat_tau", d))      sp.mirostat_tau      = (float) d;
+    if (opt_num(json, len, "mirostat_eta", d))      sp.mirostat_eta      = (float) d;
+    if (opt_num(json, len, "ignore_eos", d))        sp.ignore_eos        = d != 0;
+    opt_bias_array(json, len, "logit_bias", sp.logit_bias);
     opt_str(json, len, "grammar", sp.grammar);
     opt_str_array(json, len, "stop", sp.stop);
     return sp;
@@ -638,7 +680,25 @@ llama_sampler *build_sampler(const llama_vocab *vocab, const SamplingParams &sp)
     llama_sampler_chain_params cp = llama_sampler_chain_default_params();
     cp.no_perf = true;
     llama_sampler *chain = llama_sampler_chain_init(cp);
+    const int32_t n_vocab = llama_vocab_n_tokens(vocab);
 
+    // Logit biases run before everything else, exactly as in
+    // llama.cpp's common sampler. ignore_eos is spelled as -inf biases
+    // on every end-of-generation token, so those tokens can never be
+    // sampled — the loop's EOG check then simply never fires.
+    std::vector<llama_logit_bias> biases = sp.logit_bias;
+    if (sp.ignore_eos) {
+        for (llama_token t = 0; t < n_vocab; t++) {
+            if (llama_vocab_is_eog(vocab, t)) {
+                biases.push_back({t, -INFINITY});
+            }
+        }
+    }
+    if (!biases.empty()) {
+        llama_sampler_chain_add(chain,
+            llama_sampler_init_logit_bias(n_vocab, (int32_t) biases.size(),
+                                          biases.data()));
+    }
     if (!sp.grammar.empty()) {
         llama_sampler_chain_add(chain,
             llama_sampler_init_grammar(vocab, sp.grammar.c_str(), "root"));
@@ -652,6 +712,23 @@ llama_sampler *build_sampler(const llama_vocab *vocab, const SamplingParams &sp)
     // Temperature <= 0 means greedy: no truncation samplers, just argmax.
     if (sp.temperature <= 0.0f) {
         llama_sampler_chain_add(chain, llama_sampler_init_greedy());
+        return chain;
+    }
+    // Mirostat controls perplexity dynamically and REPLACES the
+    // truncation samplers, matching llama.cpp's common sampler wiring:
+    // temperature scaling, then the mirostat sampler (which draws the
+    // token itself, so no dist sampler either).
+    if (sp.mirostat == 1 || sp.mirostat == 2) {
+        llama_sampler_chain_add(chain, llama_sampler_init_temp(sp.temperature));
+        if (sp.mirostat == 1) {
+            llama_sampler_chain_add(chain,
+                llama_sampler_init_mirostat(n_vocab, sp.seed, sp.mirostat_tau,
+                                            sp.mirostat_eta, 100));
+        } else {
+            llama_sampler_chain_add(chain,
+                llama_sampler_init_mirostat_v2(sp.seed, sp.mirostat_tau,
+                                               sp.mirostat_eta));
+        }
         return chain;
     }
     if (sp.top_k > 0)                        llama_sampler_chain_add(chain, llama_sampler_init_top_k(sp.top_k));
@@ -949,6 +1026,47 @@ std::string llama_ctx_score(uint64_t ctx, const char *text, uint32_t text_len) {
 
 /* ------------------------------------------------------------- embeddings */
 
+namespace {
+
+// embed_of decodes toks fresh (the KV cache is cleared first — an
+// embedding is a function of the input alone) and renders the
+// context's embedding as the JSON response both embed entry points
+// share.
+std::string embed_of(CtxState *st, std::vector<llama_token> &toks,
+                     int32_t normalize) {
+    if (toks.empty()) return json_err("embed: no tokens");
+
+    llama_memory_clear(llama_get_memory(st->ctx), true);
+    llama_batch batch = llama_batch_get_one(toks.data(), (int32_t) toks.size());
+    if (llama_decode(st->ctx, batch) != 0) return json_err("embed: decode failed");
+
+    const int n_embd = llama_model_n_embd(st->model);
+    const float *emb = llama_get_embeddings_seq(st->ctx, 0);
+    if (emb == nullptr) emb = llama_get_embeddings(st->ctx);
+    if (emb == nullptr) {
+        return json_err("embed: no embeddings (create the context with embeddings=1)");
+    }
+
+    std::vector<float> v(emb, emb + n_embd);
+    if (normalize != 0) {
+        double sum = 0.0;
+        for (float x : v) sum += (double) x * (double) x;
+        const double norm = std::sqrt(sum);
+        if (norm > 0.0) {
+            for (float &x : v) x = (float) ((double) x / norm);
+        }
+    }
+    std::string out = "{\"ok\":true,\"n_embd\":" + json_num(n_embd) + ",\"embedding\":[";
+    for (size_t i = 0; i < v.size(); i++) {
+        if (i != 0) out.push_back(',');
+        out += json_num(v[i]);
+    }
+    out += "]}";
+    return out;
+}
+
+} // namespace
+
 std::string llama_ctx_embed(uint64_t ctx, const char *text, uint32_t text_len,
                             int32_t normalize) {
     CtxState *st = ctx_of(ctx);
@@ -961,34 +1079,7 @@ std::string llama_ctx_embed(uint64_t ctx, const char *text, uint32_t text_len,
             return json_err(err);
         }
         if (toks.empty()) return json_err("embed: empty text");
-
-        llama_memory_clear(llama_get_memory(st->ctx), true);
-        llama_batch batch = llama_batch_get_one(toks.data(), (int32_t) toks.size());
-        if (llama_decode(st->ctx, batch) != 0) return json_err("embed: decode failed");
-
-        const int n_embd = llama_model_n_embd(st->model);
-        const float *emb = llama_get_embeddings_seq(st->ctx, 0);
-        if (emb == nullptr) emb = llama_get_embeddings(st->ctx);
-        if (emb == nullptr) {
-            return json_err("embed: no embeddings (create the context with embeddings=1)");
-        }
-
-        std::vector<float> v(emb, emb + n_embd);
-        if (normalize != 0) {
-            double sum = 0.0;
-            for (float x : v) sum += (double) x * (double) x;
-            const double norm = std::sqrt(sum);
-            if (norm > 0.0) {
-                for (float &x : v) x = (float) ((double) x / norm);
-            }
-        }
-        std::string out = "{\"ok\":true,\"n_embd\":" + json_num(n_embd) + ",\"embedding\":[";
-        for (size_t i = 0; i < v.size(); i++) {
-            if (i != 0) out.push_back(',');
-            out += json_num(v[i]);
-        }
-        out += "]}";
-        return out;
+        return embed_of(st, toks, normalize);
     } catch (const std::exception &e) {
         return json_err(std::string("embed: ") + e.what());
     } catch (...) {
@@ -996,7 +1087,69 @@ std::string llama_ctx_embed(uint64_t ctx, const char *text, uint32_t text_len,
     }
 }
 
+std::string llama_ctx_embed_tokens(uint64_t ctx, const char *tokens_json,
+                                   uint32_t tokens_json_len, int32_t normalize) {
+    CtxState *st = ctx_of(ctx);
+    if (st == nullptr) return json_err("null context handle");
+    try {
+        JsonReader r(tokens_json, tokens_json_len);
+        if (!r.eat('[')) return json_err("embed_tokens: expected a JSON array");
+        std::vector<llama_token> toks;
+        if (!r.eat(']')) {
+            for (;;) {
+                double v = 0;
+                if (!r.num(v)) return json_err("embed_tokens: bad token value");
+                toks.push_back((llama_token) v);
+                if (r.eat(',')) continue;
+                if (!r.eat(']')) return json_err("embed_tokens: unterminated array");
+                break;
+            }
+        }
+        return embed_of(st, toks, normalize);
+    } catch (const std::exception &e) {
+        return json_err(std::string("embed_tokens: ") + e.what());
+    } catch (...) {
+        return json_err("embed_tokens: unknown error");
+    }
+}
+
 /* ------------------------------------------------------------- kv / state */
+
+std::string llama_ctx_eval(uint64_t ctx, const char *text, uint32_t text_len,
+                           int32_t add_special, int32_t parse_special) {
+    CtxState *st = ctx_of(ctx);
+    if (st == nullptr) return json_err("null context handle");
+    try {
+        const llama_vocab *vocab = llama_model_get_vocab(st->model);
+        std::vector<llama_token> toks;
+        std::string err;
+        if (!tokenize_text(vocab, std::string(text, text_len), add_special != 0,
+                           parse_special != 0, toks, err)) {
+            return json_err(err);
+        }
+        if (toks.empty()) return json_err("eval: empty text");
+        const int n = (int) toks.size();
+
+        // Same chunked decode as generation's prompt phase — splitting
+        // at n_batch is the caller's job in llama.cpp — except the KV
+        // cache is NOT cleared: positions continue where the cache
+        // ends, which is what makes this usable as prompt prefill.
+        const int nb = (int) llama_n_batch(st->ctx);
+        for (int off = 0; off < n; off += nb) {
+            const int take = std::min(nb, n - off);
+            if (llama_decode(st->ctx, llama_batch_get_one(toks.data() + off, take)) != 0) {
+                return json_err("eval: decode failed");
+            }
+        }
+        const llama_pos past = llama_memory_seq_pos_max(llama_get_memory(st->ctx), 0);
+        return "{\"ok\":true,\"n_tokens\":" + json_num((double) n) +
+               ",\"n_past\":" + json_num((double) (past + 1)) + "}";
+    } catch (const std::exception &e) {
+        return json_err(std::string("eval: ") + e.what());
+    } catch (...) {
+        return json_err("eval: unknown error");
+    }
+}
 
 void llama_ctx_reset(uint64_t ctx) {
     CtxState *st = ctx_of(ctx);
@@ -1022,11 +1175,12 @@ std::string llama_ctx_state_save(uint64_t ctx) {
     }
 }
 
-std::string llama_ctx_state_load(uint64_t ctx, uint32_t addr, uint32_t size) {
+std::string llama_ctx_state_load(uint64_t ctx, const char *data,
+                                 uint32_t size) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return json_err("null context handle");
     try {
-        const uint8_t *src = reinterpret_cast<const uint8_t *>((uintptr_t) addr);
+        const uint8_t *src = reinterpret_cast<const uint8_t *>(data);
         const size_t used = llama_state_set_data(st->ctx, src, size);
         if (used == 0 && size != 0) return json_err("state_load: rejected");
         return "{\"ok\":true,\"used\":" + json_num((double) used) + "}";
