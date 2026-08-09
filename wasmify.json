@@ -152,7 +152,8 @@
       "-lwasi-emulated-signal",
       "-lwasi-emulated-getpid",
       "-Wl,--allow-undefined-file=scripts/allow-undefined.txt"
-    ]
+    ],
+    "opt_level": "-O3"
   },
   "phases": {
     "gen-proto": {
