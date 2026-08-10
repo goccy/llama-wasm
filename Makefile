@@ -150,8 +150,13 @@ tools:
 # wasm2go warns at transpile time when the asserted address
 # matches no gather site.
 WASM2GO_F16_TABLE ?= 9015760
+# The outlining threshold is width-dependent: memory64 modules carry
+# i64 locals that double the packed-boundary round-trip cost, and the
+# measured optimum moves from 100 (wasm32) to 400 (wasm64) — tg +12%
+# at equal pp on the qwen2.5 q8_0 bench.
+WASM2GO_OUTLINE ?= $(shell grep -q '"wasm64": true' wasmify.json && echo 400 || echo 100)
 WASM2GO_ENV ?= \
-	-e WASM2GO_OUTLINE=100 \
+	-e WASM2GO_OUTLINE=$(WASM2GO_OUTLINE) \
 	-e WASM2GO_UNROLL=4 \
 	-e WASM2GO_FUSE_LOOP=1 \
 	-e WASM2GO_FUSE_LOOP_UNROLL=4 \
