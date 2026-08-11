@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """check-imports.py — assert the linked wasm imports nothing unexpected.
 
-The wasm must import only WASI preview1 and the C++ exception tag
-`env.__cpp_exception`, which wasm2go supplies. Anything else is a host
+The wasm must import only WASI preview1, the C++ exception tag
+`env.__cpp_exception`, and the callback entry point `wasmify.callback_invoke`
+— both supplied by the generated Go bundle. Anything else is a host
 dependency a Go consumer would have to implement, and is far cheaper to catch
 here than as a link error in go-llama.
 
@@ -86,12 +87,18 @@ def main():
             continue  # wasi-threads build; wasm2go runs each guest thread on a goroutine
         if module == "env" and name in allowed_env:
             continue
+        if module == "wasmify" and name == "callback_invoke":
+            # The bridge's callback entry point: C++ callback classes (the
+            # token sink) call out through this single import, and the
+            # generated Go registers the "wasmify" host module that
+            # supplies it — no consumer wiring needed.
+            continue
         unexpected.append(f"{module}.{name}")
 
     if unexpected:
         print("::error::unexpected wasm imports: " + ", ".join(sorted(unexpected)))
         raise SystemExit(1)
-    print(f"wasm imports OK ({seen} total: WASI + the C++ exception tag)")
+    print(f"wasm imports OK ({seen} total: WASI, the C++ exception tag, the callback entry)")
 
 
 if __name__ == "__main__":
