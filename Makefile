@@ -161,8 +161,12 @@ WASM2GO_ENV ?= \
 	-e WASM2GO_FUSE_LOOP=1 \
 	-e WASM2GO_FUSE_LOOP_UNROLL=4 \
 	-e WASM2GO_F16_TABLE=$(WASM2GO_F16_TABLE) \
-	-e WASM2GO_FAST_MATH=$(WASM2GO_FAST_MATH)
+	-e WASM2GO_FAST_MATH=$(WASM2GO_FAST_MATH) \
+	-e WASM2GO_VEC_DOT_PAIR_ENTRY=$(WASM2GO_VEC_DOT_PAIR_ENTRY)
 WASM2GO_FAST_MATH ?= 1
+# The trait-table entry whose self vec_dot pairs rows/columns
+# (wasm2go -vec-dot-pair-entry). 8 is this project's q8_0 type id.
+WASM2GO_VEC_DOT_PAIR_ENTRY ?= 8
 
 wasm:
 	$(CONTAINER) run --rm $(PLATFORM_FLAG) \
