@@ -99,7 +99,7 @@
     "CustomBridgeSources": [
       "llama_api.cc"
     ],
-    "GoPackage": "github.com/goccy/go-llama/internal/bridge;bridge",
+    "GoPackage": "github.com/goccy/go-llama/internal;internal",
     "Wasm2GoImportPath": "github.com/goccy/llamawasm2go",
     "StackSize": 8388608,
     "ExportFunctions": [
