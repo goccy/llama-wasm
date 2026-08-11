@@ -142,7 +142,6 @@
     ],
     "extra_ldflags": [
       "-nostdlib++",
-      "-Ldeps/wasi-eh/lib",
       "-lc++",
       "-lc++abi",
       "-lunwind",
@@ -153,7 +152,12 @@
       "-lwasi-emulated-getpid",
       "-Wl,--allow-undefined-file=scripts/allow-undefined.txt"
     ],
-    "opt_level": "-O3"
+    "opt_level": "-O3",
+    "wasm64": true,
+    "extra_ldflags_wasm32": [
+      "-Ldeps/wasi-eh/lib"
+    ],
+    "keep_symbols": true
   },
   "phases": {
     "gen-proto": {
