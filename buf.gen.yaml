@@ -20,6 +20,6 @@ plugins:
   - local: protoc-gen-wasmify-go
     out: build/wasm2go
     opt:
-      - module=github.com/goccy/go-llama/internal/bridge
+      - module=github.com/goccy/go-llama/internal
       - runtime=wasm2go
       - wasm=.wasmify/wasm-build/output/llama.wasm
