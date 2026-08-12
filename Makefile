@@ -149,24 +149,32 @@ tools:
 #   grep -oh 'int32(9[0-9]\{6\})' build/wasm2go/internal/wasm2go/p0/p0_pure.go | sort | uniq -c | sort -rn | head -3
 # wasm2go warns at transpile time when the asserted address
 # matches no gather site.
-WASM2GO_F16_TABLE ?= 9015760
+WASM2GO_F16_TABLE ?= 9331984
 # The outlining threshold is width-dependent: memory64 modules carry
 # i64 locals that double the packed-boundary round-trip cost, and the
 # measured optimum moves from 100 (wasm32) to 400 (wasm64) — tg +12%
 # at equal pp on the qwen2.5 q8_0 bench.
 WASM2GO_OUTLINE ?= $(shell grep -q '"wasm64": true' wasmify.json && echo 400 || echo 100)
-WASM2GO_ENV ?= \
-	-e WASM2GO_OUTLINE=$(WASM2GO_OUTLINE) \
-	-e WASM2GO_UNROLL=4 \
-	-e WASM2GO_FUSE_LOOP=1 \
-	-e WASM2GO_FUSE_LOOP_UNROLL=4 \
-	-e WASM2GO_F16_TABLE=$(WASM2GO_F16_TABLE) \
-	-e WASM2GO_FAST_MATH=$(WASM2GO_FAST_MATH) \
-	-e WASM2GO_VEC_DOT_PAIR_ENTRY=$(WASM2GO_VEC_DOT_PAIR_ENTRY)
+# The canonical tuning set, as VAR=value pairs. `make wasm` turns it
+# into docker -e flags; `make print-wasm2go-env` prints it as shell
+# export lines for consumers that run the pipeline steps directly
+# (CI's docker exec) so both paths transpile with the same values.
+WASM2GO_TUNING = \
+	WASM2GO_OUTLINE=$(WASM2GO_OUTLINE) \
+	WASM2GO_UNROLL=4 \
+	WASM2GO_FUSE_LOOP=1 \
+	WASM2GO_FUSE_LOOP_UNROLL=4 \
+	WASM2GO_F16_TABLE=$(WASM2GO_F16_TABLE) \
+	WASM2GO_FAST_MATH=$(WASM2GO_FAST_MATH) \
+	WASM2GO_VEC_DOT_PAIR_ENTRY=$(WASM2GO_VEC_DOT_PAIR_ENTRY)
+WASM2GO_ENV ?= $(addprefix -e ,$(WASM2GO_TUNING))
 WASM2GO_FAST_MATH ?= 1
 # The trait-table entry whose self vec_dot pairs rows/columns
 # (wasm2go -vec-dot-pair-entry). 8 is this project's q8_0 type id.
 WASM2GO_VEC_DOT_PAIR_ENTRY ?= 8
+
+print-wasm2go-env:
+	@for v in $(WASM2GO_TUNING); do echo "export $$v"; done
 
 wasm:
 	$(CONTAINER) run --rm $(PLATFORM_FLAG) \

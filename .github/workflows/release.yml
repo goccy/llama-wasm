@@ -138,6 +138,7 @@ jobs:
             wasmify gen-proto
             wasmify wasm-build --optimize --non-interactive
             rm -rf build
+            eval "$(make -s print-wasm2go-env)"
             buf generate --timeout 0
             make bundle-gomod
           '
