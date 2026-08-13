@@ -1,0 +1,219 @@
+name: build
+
+# Build + verify CI for llama-wasm. Runs the wasmify pipeline against the
+# upstream `llama.cpp/` submodule from a clean checkout, produces `llama.wasm`
+# (the wasi-sdk built inference library behind the thin embedding API) and the
+# wasm2go bundle (`build/wasm2go/`, the transpiled pure-Go form go-llama
+# consumes), uploads them as a workflow artifact, and attaches SLSA
+# build-provenance attestations. It does NOT publish a GitHub Release —
+# release.yml owns that, on `v*` tags.
+#
+# The toolchain (wasi-sdk, binaryen, buf, the wasmify CLI) lives inside the
+# wasmify base image, so the build runs entirely in a container. On top of that
+# base image this workflow maintains a project-specific cache image
+# (ghcr.io/<owner>/llama-wasm-cache) keyed on the wasmify image tag + the
+# llama.cpp submodule SHA: a successful cold build's container is
+# `docker commit`ed so a warm run finishes incrementally (the EH-enabled C++
+# runtimes and the .wasmify object cache are restored) instead of rebuilding
+# from scratch — the runtimes alone take several minutes. Only `push` events
+# publish the cache image; `pull_request` runs may read it but never write.
+#
+# `docker run` (not the GHA `container:` directive) so a free-disk-space step
+# can run on the host before the container starts.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read           # build-only: no release asset upload here
+  packages: write          # cache image push to ghcr
+  id-token: write          # actions/attest-build-provenance OIDC token
+  attestations: write
+
+env:
+  # Pinned to a released wasmify image. The cache image inherits this base layer
+  # via `docker commit`, and the tag is baked into the cache key so a wasmify
+  # upgrade rolls forward cleanly (a bumped tag misses the old cache and rebuilds).
+  WASMIFY_IMAGE: ghcr.io/goccy/wasmify:v0.6.1
+  CACHE_IMAGE: ghcr.io/${{ github.repository_owner }}/llama-wasm-cache
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk space on the runner
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: false
+          swap-storage: false
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Resolve cache image tag from wasmify version + llama.cpp submodule SHA
+        id: cache_key
+        run: |
+          submodule_sha=$(git -C llama.cpp rev-parse HEAD)
+          wasmify_tag="${WASMIFY_IMAGE##*:}"
+          if [ -z "$wasmify_tag" ] || [ "$wasmify_tag" = "$WASMIFY_IMAGE" ]; then
+            wasmify_tag="untagged"
+          fi
+          echo "tag=${CACHE_IMAGE}:${wasmify_tag}-${submodule_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Try to pull cache image
+        # `docker pull` exits non-zero on a missing tag; a miss is not a failure,
+        # downstream steps branch on the recorded `hit` flag.
+        id: cache_pull
+        continue-on-error: true
+        run: |
+          if docker pull "${{ steps.cache_key.outputs.tag }}"; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore generated files from cache image (warm path)
+        # Cache hit: the cold build's .wasmify object cache and the EH-enabled
+        # C++ runtimes live at /cache/output in the cache image. Copy them back
+        # so wasmify's incremental detection and build-eh-runtimes.sh's version
+        # stamp can short-circuit unchanged work.
+        if: steps.cache_pull.outputs.hit == 'true'
+        run: |
+          container=$(docker create "${{ steps.cache_key.outputs.tag }}")
+          docker cp "${container}:/cache/output/." "$PWD/"
+          docker rm -f "${container}"
+          ls -la .wasmify deps/wasi-eh 2>/dev/null | head -10 || true
+
+      - name: Resolve build base image
+        id: base
+        run: |
+          if [ "${{ steps.cache_pull.outputs.hit }}" = "true" ]; then
+            echo "image=${{ steps.cache_key.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            docker pull "$WASMIFY_IMAGE"
+            echo "image=$WASMIFY_IMAGE" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run wasmify pipeline
+        # The same sequence as `make wasm`, regenerating every derived artefact
+        # (build.json, api-spec.json, proto/, bridge/, the wasm2go bundle) from
+        # source — so none of them are committed. Detached with `sleep infinity`
+        # so the post-build container can be `docker commit`ed (cache miss only).
+        # `buf generate --timeout 0` disables buf's 2-minute plugin timeout: the
+        # wasm2go flavour SSA-lowers a wasm this size over several minutes, and
+        # a SIGKILL there surfaces only as "signal: killed".
+        run: |
+          docker run -d --name wasmify-build \
+            -v "$PWD:/work" -w /work \
+            -e WASMIFY_NON_INTERACTIVE=1 \
+            --entrypoint sleep \
+            "${{ steps.base.outputs.image }}" infinity
+          docker exec wasmify-build bash -ceuxo pipefail '
+            make tools
+            bash scripts/wasi-configure.sh
+            wasmify build --non-interactive
+            wasmify generate-build
+            wasmify parse-headers --header llama_api.h --clang "${WASI_SDK_PATH:-$HOME/.config/wasmify/bin/wasi-sdk}/bin/clang"
+            wasmify gen-proto
+            wasmify wasm-build --optimize --non-interactive
+            rm -rf build
+            eval "$(make -s print-wasm2go-env)"
+            buf generate --timeout 0
+            make bundle-gomod
+          '
+
+      - name: Commit and push cache image
+        # Cache miss + push events only. PR runs read the cache but never write.
+        # The bind-mount means /work writes are not in the committable layer, so
+        # copy the regenerable build state into a non-mounted path first.
+        id: cache_push
+        if: |
+          steps.cache_pull.outputs.hit != 'true' &&
+          github.event_name == 'push'
+        run: |
+          docker exec wasmify-build mkdir -p /cache/output/deps
+          docker cp .wasmify "wasmify-build:/cache/output/"
+          if [ -d deps/wasi-eh ]; then
+            docker cp deps/wasi-eh "wasmify-build:/cache/output/deps/"
+          fi
+          docker commit wasmify-build "${{ steps.cache_key.outputs.tag }}"
+          docker tag "${{ steps.cache_key.outputs.tag }}" "${CACHE_IMAGE}:latest"
+          push_out=$(docker push "${{ steps.cache_key.outputs.tag }}" | tee /dev/stderr)
+          digest=$(printf '%s\n' "$push_out" | grep -oE 'sha256:[a-f0-9]{64}' | head -n1)
+          if [ -z "$digest" ]; then
+            echo "::error::could not extract digest from docker push output" >&2
+            exit 1
+          fi
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          docker push "${CACHE_IMAGE}:latest"
+
+      - name: Attest cache image build provenance
+        if: |
+          steps.cache_pull.outputs.hit != 'true' &&
+          github.event_name == 'push' &&
+          github.event.repository.visibility == 'public'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.CACHE_IMAGE }}
+          subject-digest: ${{ steps.cache_push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Stop build container
+        if: always()
+        run: docker rm -f wasmify-build 2>/dev/null || true
+
+      - name: Stage build artifacts
+        # The SAME files release.yml publishes as Release assets on a tag; here
+        # they are only uploaded as a workflow artifact and attested.
+        run: |
+          mkdir -p release
+          cp .wasmify/wasm-build/output/llama.wasm release/llama.wasm
+          cp build/wasm2go/llama.go release/llama_wasm2go.go
+          tar -czf release/llama_wasm2go.tar.gz -C build/wasm2go/internal/wasm2go .
+          ( cd build/wasm2go/internal/wasm2go && find . -type f -print0 | sort -z \
+              | xargs -0 sha256sum ) > release/llama_wasm2go.sha256
+          # The bundle is only usable as a Go module; bundle-gomod must have run.
+          test -f build/wasm2go/internal/wasm2go/go.mod \
+            || { echo "::error::bundle go.mod missing — make bundle-gomod did not run"; exit 1; }
+          # The wasm must import nothing beyond WASI and the C++ exception tag:
+          # anything else means a host dependency slipped in that a Go consumer
+          # would have to implement.
+          python3 scripts/check-imports.py release/llama.wasm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: llama-wasm-${{ github.sha }}
+          path: release/
+          if-no-files-found: error
+
+      - uses: actions/attest-build-provenance@v2
+        # Provenance only on `push` events and only when the repo is public.
+        if: github.event_name == 'push' && github.event.repository.visibility == 'public'
+        with:
+          subject-path: |
+            release/llama.wasm
+            release/llama_wasm2go.go
+
+      - uses: actions/attest-build-provenance@v2
+        # wasm2go bundle: one attestation whose subjects are the per-file digests
+        # in the manifest, so any file extracted from the tarball verifies.
+        if: github.event_name == 'push' && github.event.repository.visibility == 'public'
+        with:
+          subject-checksums: release/llama_wasm2go.sha256

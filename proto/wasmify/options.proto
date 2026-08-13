@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package wasmify;
+
+option go_package = "github.com/goccy/wasmify/proto/wasmify";
+
+import "google/protobuf/descriptor.proto";
+
+extend google.protobuf.MessageOptions {
+  bool wasm_handle = 50000;
+  // Immediate (primary) C++ base class. For single inheritance this
+  // is the only parent.
+  string wasm_parent = 50002;
+  // Secondary parents for C++ multiple inheritance. When the C++
+  // class extends two or more bases, `wasm_parent` names the first
+  // and this repeated option lists the remaining bases (already
+  // resolved to proto message names).
+  repeated string wasm_parents = 50012;
+  bool wasm_list_type = 50005;
+  bool wasm_map_type = 50006;
+  string wasm_source_file = 50007;
+  bool wasm_abstract = 50009;
+  // Doc comment lifted from the C++ class declaration. Emitted as a
+  // Go doc comment on the generated handle struct / interface.
+  string wasm_message_comment = 50014;
+}
+
+extend google.protobuf.FieldOptions {
+  // Doc comment lifted from the C++ field declaration.
+  string wasm_field_comment = 50015;
+  // Marks a method-input handle field whose C++ counterpart takes
+  // ownership of the wrapped pointer (e.g. `unique_ptr<T>` by value
+  // or by rvalue-ref). When true, the Go-side wrapper must clear
+  // the argument's `ptr` AFTER the invoke so the per-instance Go
+  // finalizer does not call free() on memory the C++ side has
+  // already deleted. Without this clear, the Go GC double-frees:
+  // the parent's destructor runs the unique_ptr deleter, then the
+  // child's still-attached finalizer issues a second Free RPC.
+  // Typical symptom is a panic on the next handle accessed through
+  // the parent (vtable read against freed memory).
+  bool wasm_take_ownership = 50019;
+
+  // Conditional ownership-transfer marker for the C++ idiom where
+  // a method takes both a raw `T*` and a separate runtime selector
+  // parameter (bool/int/string) that decides whether the receiver
+  // adopts ownership (e.g. `SimpleTable::AddColumn(const Column*,
+  // bool is_owned)`). The string value is the snake_case proto
+  // field name of the selector parameter. Always paired with
+  // `wasm_take_ownership_equals`.
+  string wasm_take_ownership_when = 50020;
+
+  // The JSON-encoded value the selector named in
+  // `wasm_take_ownership_when` must take for ownership to
+  // transfer. Format:
+  //   bool   selector → "true" / "false"
+  //   int    selector → decimal text ("0", "1", "-7")
+  //   string selector → JSON-quoted ("\"transfer\"")
+  // Plugin parses this back into the appropriate Go expression
+  // (`if <param>` for bool=true, `if !<param>` for bool=false,
+  // `if <param> == N` for int, `if <param> == "x"` for string).
+  // Required whenever `wasm_take_ownership_when` is set.
+  string wasm_take_ownership_equals = 50021;
+}
+
+extend google.protobuf.ServiceOptions {
+  bool wasm_callback = 50001;
+  string wasm_service_source_file = 50008;
+  int32 wasm_service_id = 50010;
+}
+
+extend google.protobuf.MethodOptions {
+  string wasm_method_type = 50003;
+  string wasm_original_name = 50004;
+  int32 wasm_method_id = 50011;
+  // Doc comment lifted from the C++ method declaration.
+  string wasm_method_comment = 50016;
+}
+
+extend google.protobuf.EnumOptions {
+  // Doc comment lifted from the C++ enum declaration.
+  string wasm_enum_comment = 50017;
+}
+
+extend google.protobuf.EnumValueOptions {
+  // Doc comment lifted from the C++ enumerator declaration.
+  string wasm_enum_value_comment = 50018;
+}
+
+extend google.protobuf.FileOptions {
+  // Actual C++ namespace of the source library (e.g. "googlesql").
+  // Used by resolveAbstractHandle to map runtime C++ typeid strings
+  // back to Go concrete factories. Without it, the plugin would have
+  // to guess based on the proto package, which is arbitrary.
+  string wasm_cpp_namespace = 50013;
+
+  // Go import path the wasm2go-transpiled output should embed into
+  // its `import` / `//go:linkname` / asm cross-package JMP target
+  // sites when runtime=wasm2go is in effect. Mirrors the standard
+  // `go_package` option's role for the bridge package: the integrator
+  // sets it once on the .proto and protoc-gen-wasmify-go reads it
+  // back instead of taking it via a buf opt or env var. The disk
+  // layout under `<bridge>/internal/wasm2go/` is unchanged either
+  // way; only the embedded import path shifts. Set this to a
+  // hyphen-free module path (e.g.
+  // `github.com/goccy/googlesqlwasm2go`) to unlock the wasm2go
+  // codegen's asm-only cross-chunk trampoline mode — plan 9 asm's
+  // operand scanner has no rune substitute for "-" / "+" / etc.,
+  // so the bridge's own hyphenated module path is not eligible.
+  // Leave unset to keep the default `<bridge>/internal/wasm2go`
+  // layout. The `wasm2go_import_path=<...>` buf option and
+  // WASM2GO_IMPORT_PATH env var both override this when present, in
+  // that order, for one-off / shell-driven flows.
+  string wasm2go_package = 50022;
+}

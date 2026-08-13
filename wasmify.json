@@ -1,0 +1,188 @@
+{
+  "version": "1.0",
+  "upstream": {
+    "path": "./llama.cpp",
+    "commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
+    "branch": "HEAD"
+  },
+  "project": {
+    "name": "llama",
+    "root_dir": "./llama.cpp",
+    "language": "cpp",
+    "language_standard": "c++17"
+  },
+  "build_system": {
+    "type": "cmake",
+    "files": [
+      "llama.cpp/CMakeLists.txt",
+      "llama.cpp/src/CMakeLists.txt",
+      "llama.cpp/ggml/CMakeLists.txt",
+      "llama.cpp/ggml/src/CMakeLists.txt"
+    ]
+  },
+  "targets": [
+    {
+      "name": "llama",
+      "type": "library",
+      "build_target": "libllama.a",
+      "source_dirs": [
+        "llama.cpp/src",
+        "llama.cpp/ggml/src"
+      ],
+      "description": "Static llama.cpp inference library plus the ggml CPU backend, built for wasm32-wasip1 with wasm exception handling and SIMD128. The embedding API in llama_api.h links against this."
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "wasi-sdk",
+      "type": "tool",
+      "required": true
+    },
+    {
+      "name": "cmake",
+      "type": "tool",
+      "required": true
+    },
+    {
+      "name": "ninja",
+      "type": "tool",
+      "required": true
+    }
+  ],
+  "required_tools": [
+    {
+      "name": "cmake",
+      "installed": false,
+      "detect_cmd": "cmake --version",
+      "install": {
+        "darwin": {
+          "commands": [
+            "brew install cmake"
+          ]
+        },
+        "debian": {
+          "commands": [
+            "apt-get update",
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake"
+          ]
+        }
+      }
+    },
+    {
+      "name": "ninja",
+      "installed": false,
+      "detect_cmd": "ninja --version",
+      "install": {
+        "darwin": {
+          "commands": [
+            "brew install ninja"
+          ]
+        },
+        "debian": {
+          "commands": [
+            "apt-get update",
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ninja-build"
+          ]
+        }
+      }
+    }
+  ],
+  "build_commands": {
+    "configure": "bash scripts/wasi-configure.sh",
+    "build": "bash ../scripts/wasi-build.sh"
+  },
+  "user_selection": {
+    "target_name": "llama",
+    "build_type": "library"
+  },
+  "bridge": {
+    "CustomBridgeSources": [
+      "llama_api.cc"
+    ],
+    "GoPackage": "github.com/goccy/go-llama/internal;internal",
+    "Wasm2GoImportPath": "github.com/goccy/llamawasm2go",
+    "StackSize": 8388608,
+    "ExportFunctions": [
+      "llama_wasm_init",
+      "llama_wasm_free",
+      "llama_wasm_build_info",
+      "llama_wasm_last_error",
+      "llama_model_load",
+      "llama_model_free",
+      "llama_model_info",
+      "llama_model_load_progress_addr",
+      "llama_ctx_new",
+      "llama_ctx_free",
+      "llama_ctx_interrupt_addr",
+      "llama_tokenize",
+      "llama_detokenize",
+      "llama_token_to_piece",
+      "llama_ctx_generate",
+      "llama_ctx_lora_set",
+      "llama_lora_free",
+      "llama_lora_load",
+      "llama_ctx_generate_speculative",
+      "llama_ctx_score",
+      "llama_wasm::token_sink",
+      "llama_chat_apply_template",
+      "llama_ctx_embed",
+      "llama_ctx_eval",
+      "llama_ctx_embed_tokens",
+      "llama_ctx_reset",
+      "llama_ctx_state_save",
+      "llama_ctx_state_load"
+    ]
+  },
+  "wasm_build": {
+    "extra_cxxflags": [
+      "-std=gnu++17",
+      "-fwasm-exceptions",
+      "-msimd128",
+      "-D_WASI_EMULATED_SIGNAL",
+      "-D_WASI_EMULATED_MMAN",
+      "-D_WASI_EMULATED_PROCESS_CLOCKS",
+      "-D_WASI_EMULATED_GETPID"
+    ],
+    "bridge_extra_includes": [
+      "llama.cpp/include",
+      "llama.cpp/ggml/include"
+    ],
+    "extra_ldflags": [
+      "-nostdlib++",
+      "-lc++",
+      "-lc++abi",
+      "-lunwind",
+      "-ldl",
+      "-lwasi-emulated-process-clocks",
+      "-lwasi-emulated-mman",
+      "-lwasi-emulated-signal",
+      "-lwasi-emulated-getpid",
+      "-Wl,--allow-undefined-file=scripts/allow-undefined.txt"
+    ],
+    "opt_level": "-O3",
+    "wasm64": true,
+    "extra_ldflags_wasm32": [
+      "-Ldeps/wasi-eh/lib"
+    ],
+    "keep_symbols": true
+  },
+  "phases": {
+    "gen-proto": {
+      "completed_at": "2026-08-06T14:23:16Z",
+      "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
+      "output_files": [
+        "proto/llama.proto",
+        "proto/wasmify/options.proto",
+        "bridge/api_bridge.cc",
+        "bridge/api_bridge.h"
+      ]
+    },
+    "parse-headers": {
+      "completed_at": "2026-08-06T14:23:16Z",
+      "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
+      "output_files": [
+        "api-spec.json"
+      ]
+    }
+  }
+}
