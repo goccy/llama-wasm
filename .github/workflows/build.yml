@@ -38,7 +38,7 @@ env:
   # Pinned to a released wasmify image. The cache image inherits this base layer
   # via `docker commit`, and the tag is baked into the cache key so a wasmify
   # upgrade rolls forward cleanly (a bumped tag misses the old cache and rebuilds).
-  WASMIFY_IMAGE: ghcr.io/goccy/wasmify:v0.6.0
+  WASMIFY_IMAGE: ghcr.io/goccy/wasmify:v0.6.1
   CACHE_IMAGE: ghcr.io/${{ github.repository_owner }}/llama-wasm-cache
 
 jobs:
