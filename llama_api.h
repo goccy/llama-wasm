@@ -150,7 +150,8 @@ public:
 
 /* Run generation and return JSON:
  *
- *   {"ok":true,"text":"...","tokens":[..],"n_prompt":N,"n_decoded":N,
+ *   {"ok":true,"text":"...","tokens":[..],"n_prompt":N,"n_cached":N,
+ *    "n_decoded":N,
  *    "stop_reason":"eos"|"length"|"stop"|"interrupted","interrupted":bool,
  *    "timings":{"prompt_ms":f,"decode_ms":f}}
  *
@@ -167,6 +168,12 @@ public:
  *    "mirostat_eta":float,
  *    "ignore_eos":int,          // non-zero: end-of-generation tokens
  *                               // are excluded from sampling
+ *    "cache_prompt":int,        // non-zero: treat the prompt as the whole
+ *                               // intended context, keep the longest prefix
+ *                               // already in the KV cache and decode only
+ *                               // the rest (n_cached reports the reuse).
+ *                               // Off, the prompt appends at the cache's
+ *                               // current end (Eval-prefill continuation).
  *    "logit_bias":[[token,bias],..]} // added to those tokens' logits;
  *                               // -inf forbids a token outright
  *
@@ -261,12 +268,17 @@ void llama_ctx_reset(uint64_t ctx);
 /* Serialize the context state (KV cache + RNG) into the context's state
  * buffer and return `{"ok":true,"addr":N,"size":N}` — the caller reads that
  * many bytes at that linear-memory address. The buffer stays valid until the
- * next state call on this context. */
+ * next state call on this context. The blob also carries the prefix-history
+ * tokens in a bridge envelope, so a restored context composes with the
+ * generate params' cache_prompt without a rebuild. */
 std::string llama_ctx_state_save(uint64_t ctx);
 
 /* Restore a context state previously produced by llama_ctx_state_save.
  * `data` carries the serialized bytes (the bridge copies them into
- * linear memory; they may contain NUL bytes). */
+ * linear memory; they may contain NUL bytes). A blob from this bridge also
+ * restores the prefix history for cache_prompt; a bare llama-state blob
+ * (an older bridge's) restores with the history invalid, so the next
+ * cache_prompt generate rebuilds from scratch. */
 std::string llama_ctx_state_load(uint64_t ctx, const char *data,
                                  uint32_t size);
 
