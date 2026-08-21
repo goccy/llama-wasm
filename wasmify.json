@@ -101,6 +101,8 @@
     ],
     "GoPackage": "github.com/goccy/go-llama/internal;internal",
     "Wasm2GoImportPath": "github.com/goccy/llamawasm2go",
+    "HostThreads": true,
+    "MaxMemoryPages": 131072,
     "StackSize": 8388608,
     "ExportFunctions": [
       "llama_wasm_init",
@@ -134,6 +136,9 @@
     ]
   },
   "wasm_build": {
+    "keep_symbols": true,
+    "opt_level": "-O3",
+    "wasm64": true,
     "extra_cxxflags": [
       "-std=gnu++17",
       "-fwasm-exceptions",
@@ -159,16 +164,13 @@
       "-lwasi-emulated-getpid",
       "-Wl,--allow-undefined-file=scripts/allow-undefined.txt"
     ],
-    "opt_level": "-O3",
-    "wasm64": true,
     "extra_ldflags_wasm32": [
       "-Ldeps/wasi-eh/lib"
-    ],
-    "keep_symbols": true
+    ]
   },
   "phases": {
     "gen-proto": {
-      "completed_at": "2026-08-06T14:23:16Z",
+      "completed_at": "2026-08-21T12:54:43Z",
       "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
       "output_files": [
         "proto/llama.proto",
@@ -178,7 +180,7 @@
       ]
     },
     "parse-headers": {
-      "completed_at": "2026-08-06T14:23:16Z",
+      "completed_at": "2026-08-21T12:54:43Z",
       "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
       "output_files": [
         "api-spec.json"
