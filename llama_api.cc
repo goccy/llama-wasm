@@ -9,6 +9,7 @@
 #include "llama_api.h"
 
 #include "llama.h"
+#include "ggml-cpu.h"
 
 #include <algorithm>
 #include <chrono>
@@ -277,6 +278,12 @@ struct CtxState {
     // state_buf backs llama_ctx_state_save: the host reads it straight out of
     // linear memory, so it must outlive the call.
     std::vector<uint8_t> state_buf;
+    // threadpool is the persistent ggml worker pool attached to the context
+    // in a threads build. Without one, ggml creates and destroys a disposable
+    // pool — n_threads-1 thread spawns plus joins — for EVERY graph, i.e.
+    // for every generated token. Workers here spin between graphs (ggml's
+    // poll budget) and go to sleep shortly after a request completes.
+    struct ggml_threadpool *threadpool = nullptr;
     // hist mirrors the tokens whose KV entries are materialized in the
     // context, in position order — what a cache_prompt generate matches the
     // new prompt against to skip re-decoding a shared prefix. Every path that
@@ -551,6 +558,17 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
         if (opt_num(json, len, "rope_freq_scale", d)) cp.rope_freq_scale = (float) d;
 
         llama_context *c = llama_init_from_model(ms->model, cp);
+#if defined(_REENTRANT)
+        struct ggml_threadpool *tp = nullptr;
+        if (c != nullptr && cp.n_threads > 1) {
+            struct ggml_threadpool_params tpp =
+                ggml_threadpool_params_default(cp.n_threads);
+            tp = ggml_threadpool_new(&tpp);
+            if (tp != nullptr) {
+                llama_attach_threadpool(c, tp, tp);
+            }
+        }
+#endif
         if (c == nullptr) {
             set_error("failed to create context");
             return 0;
@@ -558,6 +576,9 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
         auto *st = new CtxState();
         st->ctx   = c;
         st->model = ms->model;
+#if defined(_REENTRANT)
+        st->threadpool = tp;
+#endif
         return reinterpret_cast<uint64_t>(st);
     } catch (const std::exception &e) {
         set_error(std::string("ctx_new: ") + e.what());
@@ -572,6 +593,10 @@ void llama_ctx_free(uint64_t ctx) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return;
     if (st->ctx != nullptr) llama_free(st->ctx);
+#if defined(_REENTRANT)
+    // Free the pool after the context: llama_free may still touch it.
+    if (st->threadpool != nullptr) ggml_threadpool_free(st->threadpool);
+#endif
     delete st;
 }
 
