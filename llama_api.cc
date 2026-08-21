@@ -1548,17 +1548,46 @@ void llama_ctx_reset(uint64_t ctx) {
     st->hist_valid = true;
 }
 
+// The state blob is the engine's serialized state wrapped in a small bridge
+// envelope that carries the prefix-history tokens alongside it, so a restored
+// context composes with cache_prompt instead of forcing a full rebuild:
+//
+//   magic "LWSTATE1" | uint32 n_hist | n_hist * int32 tokens | llama state
+//
+// n_hist = 0xFFFFFFFF records "history was invalid at save time" (an empty
+// but VALID history is a legitimate n_hist of 0). A blob without the magic is
+// read as a bare llama state — what older bridges produced — and restores
+// with the history invalid, exactly the old behavior. All fields are
+// little-endian; the blob only ever lives in wasm memory, which is LE.
+constexpr char kStateMagic[8] = {'L','W','S','T','A','T','E','1'};
+constexpr uint32_t kHistInvalid = 0xFFFFFFFFu;
+
 std::string llama_ctx_state_save(uint64_t ctx) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return json_err("null context handle");
     try {
         const size_t n = llama_state_get_size(st->ctx);
-        st->state_buf.resize(n);
-        const size_t got = llama_state_get_data(st->ctx, st->state_buf.data(), n);
+        const uint32_t n_hist =
+            st->hist_valid ? (uint32_t) st->hist.size() : kHistInvalid;
+        const size_t hist_bytes =
+            st->hist_valid ? st->hist.size() * sizeof(int32_t) : 0;
+        const size_t header = sizeof(kStateMagic) + sizeof(uint32_t);
+        st->state_buf.resize(header + hist_bytes + n);
+        uint8_t *p = st->state_buf.data();
+        std::memcpy(p, kStateMagic, sizeof(kStateMagic));
+        p += sizeof(kStateMagic);
+        std::memcpy(p, &n_hist, sizeof(n_hist));
+        p += sizeof(n_hist);
+        if (hist_bytes != 0) {
+            std::memcpy(p, st->hist.data(), hist_bytes);
+            p += hist_bytes;
+        }
+        const size_t got = llama_state_get_data(st->ctx, p, n);
         if (got == 0 && n != 0) return json_err("state_save: failed");
+        st->state_buf.resize(header + hist_bytes + got);
         return "{\"ok\":true,\"addr\":" +
                json_num((double) (uintptr_t) st->state_buf.data()) +
-               ",\"size\":" + json_num((double) got) + "}";
+               ",\"size\":" + json_num((double) st->state_buf.size()) + "}";
     } catch (const std::exception &e) {
         return json_err(std::string("state_save: ") + e.what());
     } catch (...) {
@@ -1572,12 +1601,38 @@ std::string llama_ctx_state_load(uint64_t ctx, const char *data,
     if (st == nullptr) return json_err("null context handle");
     try {
         const uint8_t *src = reinterpret_cast<const uint8_t *>(data);
-        const size_t used = llama_state_set_data(st->ctx, src, size);
-        if (used == 0 && size != 0) return json_err("state_load: rejected");
-        // The restored cache's tokens are unknown to the prefix-history
-        // bookkeeping; the next cache_prompt generate rebuilds from scratch.
+        size_t payload_off = 0;
+        uint32_t n_hist = kHistInvalid;
+        const size_t header = sizeof(kStateMagic) + sizeof(uint32_t);
+        if (size >= header &&
+            std::memcmp(src, kStateMagic, sizeof(kStateMagic)) == 0) {
+            std::memcpy(&n_hist, src + sizeof(kStateMagic), sizeof(n_hist));
+            payload_off = header;
+            if (n_hist != kHistInvalid) {
+                const size_t hist_bytes = (size_t) n_hist * sizeof(int32_t);
+                if (header + hist_bytes > size) {
+                    return json_err("state_load: truncated history");
+                }
+                payload_off += hist_bytes;
+            }
+        }
+        const size_t used = llama_state_set_data(st->ctx, src + payload_off,
+                                                 size - payload_off);
+        if (used == 0 && size - payload_off != 0) {
+            return json_err("state_load: rejected");
+        }
+        // Restore the prefix history saved with the state, so cache_prompt
+        // picks up right where the snapshot left off. A bare or
+        // invalid-history blob leaves it invalid: the next cache_prompt
+        // generate rebuilds from scratch.
         st->hist.clear();
         st->hist_valid = false;
+        if (payload_off != 0 && n_hist != kHistInvalid) {
+            const int32_t *toks = reinterpret_cast<const int32_t *>(
+                src + sizeof(kStateMagic) + sizeof(uint32_t));
+            st->hist.assign(toks, toks + n_hist);
+            st->hist_valid = true;
+        }
         return "{\"ok\":true,\"used\":" + json_num((double) used) + "}";
     } catch (const std::exception &e) {
         return json_err(std::string("state_load: ") + e.what());
