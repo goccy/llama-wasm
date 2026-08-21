@@ -150,7 +150,8 @@ public:
 
 /* Run generation and return JSON:
  *
- *   {"ok":true,"text":"...","tokens":[..],"n_prompt":N,"n_decoded":N,
+ *   {"ok":true,"text":"...","tokens":[..],"n_prompt":N,"n_cached":N,
+ *    "n_decoded":N,
  *    "stop_reason":"eos"|"length"|"stop"|"interrupted","interrupted":bool,
  *    "timings":{"prompt_ms":f,"decode_ms":f}}
  *
@@ -167,6 +168,12 @@ public:
  *    "mirostat_eta":float,
  *    "ignore_eos":int,          // non-zero: end-of-generation tokens
  *                               // are excluded from sampling
+ *    "cache_prompt":int,        // non-zero: treat the prompt as the whole
+ *                               // intended context, keep the longest prefix
+ *                               // already in the KV cache and decode only
+ *                               // the rest (n_cached reports the reuse).
+ *                               // Off, the prompt appends at the cache's
+ *                               // current end (Eval-prefill continuation).
  *    "logit_bias":[[token,bias],..]} // added to those tokens' logits;
  *                               // -inf forbids a token outright
  *

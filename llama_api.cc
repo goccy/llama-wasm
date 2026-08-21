@@ -277,7 +277,15 @@ struct CtxState {
     // state_buf backs llama_ctx_state_save: the host reads it straight out of
     // linear memory, so it must outlive the call.
     std::vector<uint8_t> state_buf;
-
+    // hist mirrors the tokens whose KV entries are materialized in the
+    // context, in position order — what a cache_prompt generate matches the
+    // new prompt against to skip re-decoding a shared prefix. Every path that
+    // decodes maintains it; a path that mutates the cache in a way this
+    // bookkeeping does not model (state_load, LoRA swaps, speculative
+    // decoding, score/embed scratch use) flips hist_valid instead, and the
+    // next cache_prompt generate clears the cache and rebuilds from scratch.
+    std::vector<llama_token> hist;
+    bool hist_valid = true;
 };
 
 // Process-wide bits. The error slot is thread_local so a wasi-threads agent
@@ -493,6 +501,10 @@ std::string llama_ctx_lora_set(uint64_t ctx, const char *adapters_json,
                                     scales.data()) != 0) {
             return json_err("lora_set: engine rejected the adapter set");
         }
+        // Cached KV was computed with the previous adapter set; a later
+        // cache_prompt generate must not splice new logits onto it.
+        st->hist.clear();
+        st->hist_valid = false;
         return "{\"ok\":true}";
     } catch (const std::exception &e) {
         return json_err(std::string("lora_set: ") + e.what());
@@ -700,6 +712,12 @@ struct SamplingParams {
     float   mirostat_tau      = 5.0f;
     float   mirostat_eta      = 0.1f;
     bool    ignore_eos        = false;
+    // cache_prompt opts a generate into prompt-prefix reuse: the prompt is
+    // treated as the WHOLE intended context, the longest prefix already in
+    // the KV cache is kept, the divergent tail is dropped and only the rest
+    // is decoded. Off by default because the default contract is positional
+    // continuation (Eval prefill + Generate).
+    bool    cache_prompt      = false;
     std::vector<llama_logit_bias> logit_bias;
     std::string grammar;
     std::vector<std::string> stop;
@@ -748,6 +766,7 @@ SamplingParams parse_params(const char *json, size_t len) {
     if (opt_num(json, len, "mirostat_tau", d))      sp.mirostat_tau      = (float) d;
     if (opt_num(json, len, "mirostat_eta", d))      sp.mirostat_eta      = (float) d;
     if (opt_num(json, len, "ignore_eos", d))        sp.ignore_eos        = d != 0;
+    if (opt_num(json, len, "cache_prompt", d))      sp.cache_prompt      = d != 0;
     opt_bias_array(json, len, "logit_bias", sp.logit_bias);
     opt_str(json, len, "grammar", sp.grammar);
     opt_str_array(json, len, "stop", sp.stop);
@@ -876,6 +895,23 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
         const char *stop_reason = "length";
         bool interrupted = false;
 
+        // Prompt-prefix reuse: keep the longest prefix of the prompt whose
+        // KV entries already exist, drop everything the cache holds beyond
+        // it, and decode only the rest. At least the final prompt token is
+        // always re-decoded — sampling needs its logits.
+        int n_keep = 0;
+        if (sp.cache_prompt) {
+            if (!st->hist_valid) {
+                llama_memory_clear(llama_get_memory(st->ctx), true);
+                st->hist.clear();
+                st->hist_valid = true;
+            }
+            const int lim = std::min((int) st->hist.size(), n_prompt - 1);
+            while (n_keep < lim && st->hist[n_keep] == toks[n_keep]) n_keep++;
+            llama_memory_seq_rm(llama_get_memory(st->ctx), 0, n_keep, -1);
+            st->hist.resize(n_keep);
+        }
+
         // Decode the prompt in n_batch-sized chunks: llama_decode rejects
         // a batch larger than the context's n_batch, and splitting is the
         // CALLER's job (native llama.cpp CLIs do the same). The interrupt
@@ -884,7 +920,7 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
         int n_decoded = 0;
         bool prompt_ok = true;
         const auto t_start = std::chrono::steady_clock::now();
-        for (int off = 0; off < n_prompt && !interrupted; off += nb) {
+        for (int off = n_keep; off < n_prompt && !interrupted; off += nb) {
             if (st->interrupt != 0) {
                 interrupted = true;
                 stop_reason = "interrupted";
@@ -894,6 +930,10 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
             if (llama_decode(st->ctx, llama_batch_get_one(toks.data() + off, take)) != 0) {
                 prompt_ok = false;
                 break;
+            }
+            if (st->hist_valid) {
+                st->hist.insert(st->hist.end(), toks.begin() + off,
+                                toks.begin() + off + take);
             }
         }
         if (!prompt_ok) {
@@ -934,6 +974,7 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
                 llama_sampler_free(smpl);
                 return json_err("generate: decode failed");
             }
+            if (st->hist_valid) st->hist.push_back(produced.back());
         }
         st->generating = false;
         llama_sampler_free(smpl);
@@ -948,6 +989,7 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
         }
         out += "]";
         out += ",\"n_prompt\":" + json_num(n_prompt);
+        out += ",\"n_cached\":" + json_num(n_keep);
         out += ",\"n_decoded\":" + json_num(n_decoded);
         out += ",\"stop_reason\":" + json_str(stop_reason);
         out += ",\"interrupted\":" + std::string(interrupted ? "true" : "false");
@@ -1107,9 +1149,15 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
         st->generating = true;
 
         // Self-contained: both caches restart from the prompt, keeping the
-        // two sequences aligned by construction.
+        // two sequences aligned by construction. The acceptance loop edits
+        // both caches in ways the prefix-history bookkeeping does not model,
+        // so both go invalid until something rebuilds them.
         llama_memory_clear(llama_get_memory(st->ctx), true);
         llama_memory_clear(llama_get_memory(ds->ctx), true);
+        st->hist.clear();
+        st->hist_valid = false;
+        ds->hist.clear();
+        ds->hist_valid = false;
 
         auto prefill = [&](CtxState *cs) -> bool {
             const int nb = (int) llama_n_batch(cs->ctx);
@@ -1307,7 +1355,11 @@ std::string llama_ctx_score(uint64_t ctx, const char *text, uint32_t text_len) {
         const int n_ctx = (int) llama_n_ctx(st->ctx);
         if (n > n_ctx) return json_err("score: text exceeds the context window");
 
+        // Scratch use of the cache: the scored text replaces whatever the
+        // prefix-history bookkeeping was tracking.
         llama_memory_clear(llama_get_memory(st->ctx), true);
+        st->hist.clear();
+        st->hist_valid = false;
         llama_batch batch = llama_batch_init(n, 0, 1);
         for (int i = 0; i < n; i++) {
             batch.token[i]     = toks[i];
@@ -1364,6 +1416,10 @@ namespace {
 std::string embed_of(CtxState *st, std::vector<llama_token> &toks,
                      int32_t normalize) {
     if (toks.empty()) return json_err("embed: no tokens");
+
+    // Scratch use of the cache, same as score.
+    st->hist.clear();
+    st->hist_valid = false;
 
     llama_memory_clear(llama_get_memory(st->ctx), true);
     llama_batch batch = llama_batch_get_one(toks.data(), (int32_t) toks.size());
@@ -1469,6 +1525,10 @@ std::string llama_ctx_eval(uint64_t ctx, const char *text, uint32_t text_len,
             if (llama_decode(st->ctx, llama_batch_get_one(toks.data() + off, take)) != 0) {
                 return json_err("eval: decode failed");
             }
+            if (st->hist_valid) {
+                st->hist.insert(st->hist.end(), toks.begin() + off,
+                                toks.begin() + off + take);
+            }
         }
         const llama_pos past = llama_memory_seq_pos_max(llama_get_memory(st->ctx), 0);
         return "{\"ok\":true,\"n_tokens\":" + json_num((double) n) +
@@ -1484,6 +1544,8 @@ void llama_ctx_reset(uint64_t ctx) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr || st->ctx == nullptr) return;
     llama_memory_clear(llama_get_memory(st->ctx), true);
+    st->hist.clear();
+    st->hist_valid = true;
 }
 
 std::string llama_ctx_state_save(uint64_t ctx) {
@@ -1512,6 +1574,10 @@ std::string llama_ctx_state_load(uint64_t ctx, const char *data,
         const uint8_t *src = reinterpret_cast<const uint8_t *>(data);
         const size_t used = llama_state_set_data(st->ctx, src, size);
         if (used == 0 && size != 0) return json_err("state_load: rejected");
+        // The restored cache's tokens are unknown to the prefix-history
+        // bookkeeping; the next cache_prompt generate rebuilds from scratch.
+        st->hist.clear();
+        st->hist_valid = false;
         return "{\"ok\":true,\"used\":" + json_num((double) used) + "}";
     } catch (const std::exception &e) {
         return json_err(std::string("state_load: ") + e.what());
