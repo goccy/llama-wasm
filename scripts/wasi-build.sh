@@ -32,7 +32,7 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 # caller overrides it: the priming build must use the same thread model as
 # the wasmify replay, or the replay's --shared-memory link flags meet
 # non-atomics sysroot objects and the configure try-compile fails.
-: "${LLAMA_THREADS:=$(grep -q '"'"'"HostThreads": true'"'"' "$HERE/wasmify.json" && echo 1 || echo 0)}"
+: "${LLAMA_THREADS:=$(grep -q "\"HostThreads\": true" "$HERE/wasmify.json" && echo 1 || echo 0)}"
 SRC="$HERE/llama.cpp"
 BUILD_DIR="$HERE/build-wasi"
 EH_PREFIX="$HERE/deps/wasi-eh"
