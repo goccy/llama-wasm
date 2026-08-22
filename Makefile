@@ -1,7 +1,7 @@
 # Container image shipping every toolchain wasmify needs (wasi-sdk + binaryen +
 # buf + the wasmify CLI itself). Override locally to pin a SHA or to iterate on a
 # wasmify branch — e.g. `make wasm IMAGE=localhost:5001/wasmify:local`.
-IMAGE ?= ghcr.io/goccy/wasmify:v0.6.2
+IMAGE ?= ghcr.io/goccy/wasmify:v0.6.3
 
 # Resource limits for the container that runs the pipeline. A full llama.cpp +
 # ggml wasm build peaks well under MEMORY; CPUS bounds the build's parallelism.
@@ -72,11 +72,11 @@ WASMIFY_BUILD_STEP :=
 WASM2GO_UNREPLACE :=
 endif
 
-# Set LLAMA_THREADS=1 to configure the wasm32-wasip1-threads build, which lets
-# ggml run its kernels on several threads (wasm2go runs each guest thread on a
-# goroutine, so no host work is needed). The default single-threaded build has
-# no pthread_create, so a context must use n_threads=1.
-LLAMA_THREADS ?= 0
+# LLAMA_THREADS selects the -threads priming build (real pthreads; wasm2go
+# runs each guest thread on a goroutine). It defaults to wasmify.json's
+# bridge.HostThreads so the priming build and the wasmify replay always agree
+# on the thread model; override on the make command line to experiment.
+LLAMA_THREADS ?= $(shell grep -q '"HostThreads": true' wasmify.json && echo 1 || echo 0)
 
 BUILD_ENV = WASMIFY_NON_INTERACTIVE=1 LLAMA_THREADS=$(LLAMA_THREADS)
 
