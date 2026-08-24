@@ -1,7 +1,7 @@
 # Container image shipping every toolchain wasmify needs (wasi-sdk + binaryen +
 # buf + the wasmify CLI itself). Override locally to pin a SHA or to iterate on a
 # wasmify branch — e.g. `make wasm IMAGE=localhost:5001/wasmify:local`.
-IMAGE ?= ghcr.io/goccy/wasmify:v0.6.4
+IMAGE ?= ghcr.io/goccy/wasmify:v0.6.5
 
 # Resource limits for the container that runs the pipeline. A full llama.cpp +
 # ggml wasm build peaks well under MEMORY; CPUS bounds the build's parallelism.
@@ -135,23 +135,13 @@ tools:
 #   build/wasm2go/internal/wasm2go/go.mod         <- bundle module manifest
 # Transpiler tuning for the wasm2go bundle. These reach the
 # protoc-gen-wasmify-go transpile step through the container
-# environment. WASM2GO_F16_TABLE asserts the address of ggml's
-# runtime-built f16 table (required for the f16 gather rewrite —
-# without it that optimization silently stays off); the rest match
-# the measured production configuration. Override on the make
-# command line to build variants (e.g. WASM2GO_FAST_MATH=).
-#
-# The table address MOVES whenever the wasm's data layout shifts
-# (any bridge or llama.cpp change, including patches/). After a
-# rebuild, re-derive it from the transpiled output: the repack scale
-# gathers pass the table base as the load32_splat memarg offset, so
-# it reads directly off those call sites (one distinct value across
-# every site — a tie or an empty match means the layout changed in a
-# way that needs a human look, not a guess):
-#   grep -rhoE 'load32_splat\(m, [^,]+, int64\([0-9]{7,9}\)\)' build/wasm2go/internal/wasm2go/p*/p*_pure.go | grep -oE 'int64\([0-9]+\)\)$' | sort | uniq -c
-# wasm2go warns at transpile time when the asserted address
-# matches no gather site.
-WASM2GO_F16_TABLE ?= 8798368
+# environment; they match the measured production configuration.
+# Override on the make command line to build variants (e.g.
+# WASM2GO_FAST_MATH=). The f16 table address needs no configuration:
+# wasm2go auto-detects it from the engine's own init loop and FAILS
+# the transpile when gather sites cannot be verified (the v0.2.1
+# release shipped ~35% slower decode from a stale manual address —
+# that class of input no longer exists).
 # The outlining threshold is width-dependent: memory64 modules carry
 # i64 locals that double the packed-boundary round-trip cost, and the
 # measured optimum moves from 100 (wasm32) to 400 (wasm64) — tg +12%
@@ -166,7 +156,6 @@ WASM2GO_TUNING = \
 	WASM2GO_UNROLL=4 \
 	WASM2GO_FUSE_LOOP=1 \
 	WASM2GO_FUSE_LOOP_UNROLL=4 \
-	WASM2GO_F16_TABLE=$(WASM2GO_F16_TABLE) \
 	WASM2GO_FAST_MATH=$(WASM2GO_FAST_MATH) \
 	WASM2GO_VEC_DOT_PAIR_ENTRY=$(WASM2GO_VEC_DOT_PAIR_ENTRY) \
 	WASM2GO_VEC_DOT_ROWS=$(WASM2GO_VEC_DOT_ROWS)
