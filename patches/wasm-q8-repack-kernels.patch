@@ -1,0 +1,218 @@
+diff --git a/ggml/src/ggml-cpu/CMakeLists.txt b/ggml/src/ggml-cpu/CMakeLists.txt
+index 836bae4d0..b56e80cab 100644
+--- a/ggml/src/ggml-cpu/CMakeLists.txt
++++ b/ggml/src/ggml-cpu/CMakeLists.txt
+@@ -566,6 +566,7 @@ function(ggml_add_cpu_backend_variant_impl tag_name)
+     elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "wasm")
+         message(STATUS "Wasm detected")
+         list (APPEND GGML_CPU_SOURCES ggml-cpu/arch/wasm/quants.c)
++        list (APPEND GGML_CPU_SOURCES ggml-cpu/arch/wasm/repack.cpp)
+     else()
+         message(WARNING "Unknown CPU architecture. Falling back to generic implementations.")
+         list(APPEND ARCH_FLAGS -DGGML_CPU_GENERIC)
+diff --git a/ggml/src/ggml-cpu/arch-fallback.h b/ggml/src/ggml-cpu/arch-fallback.h
+index 152e0bac9..cc581dcc1 100644
+--- a/ggml/src/ggml-cpu/arch-fallback.h
++++ b/ggml/src/ggml-cpu/arch-fallback.h
+@@ -332,7 +332,6 @@
+ #define ggml_gemv_iq4_nl_8x8_q8_0_generic ggml_gemv_iq4_nl_8x8_q8_0
+ #define ggml_gemv_mxfp4_4x4_q8_0_generic ggml_gemv_mxfp4_4x4_q8_0
+ #define ggml_gemv_mxfp4_8x8_q8_0_generic ggml_gemv_mxfp4_8x8_q8_0
+-#define ggml_gemv_q8_0_4x4_q8_0_generic ggml_gemv_q8_0_4x4_q8_0
+ #define ggml_gemv_q8_0_4x8_q8_0_generic ggml_gemv_q8_0_4x8_q8_0
+ #define ggml_gemm_q4_0_4x4_q8_0_generic ggml_gemm_q4_0_4x4_q8_0
+ #define ggml_gemm_q4_0_4x8_q8_0_generic ggml_gemm_q4_0_4x8_q8_0
+@@ -348,6 +347,5 @@
+ #define ggml_gemm_iq4_nl_8x8_q8_0_generic ggml_gemm_iq4_nl_8x8_q8_0
+ #define ggml_gemm_mxfp4_4x4_q8_0_generic ggml_gemm_mxfp4_4x4_q8_0
+ #define ggml_gemm_mxfp4_8x8_q8_0_generic ggml_gemm_mxfp4_8x8_q8_0
+-#define ggml_gemm_q8_0_4x4_q8_0_generic ggml_gemm_q8_0_4x4_q8_0
+ #define ggml_gemm_q8_0_4x8_q8_0_generic ggml_gemm_q8_0_4x8_q8_0
+ #endif
+diff --git a/ggml/src/ggml-cpu/arch/wasm/repack.cpp b/ggml/src/ggml-cpu/arch/wasm/repack.cpp
+new file mode 100644
+index 000000000..4b062cc10
+--- /dev/null
++++ b/ggml/src/ggml-cpu/arch/wasm/repack.cpp
+@@ -0,0 +1,165 @@
++#define GGML_COMMON_IMPL_CPP
++#define GGML_COMMON_DECL_CPP
++#include "ggml-common.h"
++#include "ggml-backend-impl.h"
++
++#include "ggml-impl.h"
++#include "ggml-cpu.h"
++#include "ggml-cpu-impl.h"
++#include "simd-mappings.h"
++#include "traits.h"
++
++#include <cassert>
++
++#define GGML_CPU_CLANG_WORKAROUND
++#include "../../repack.h"
++
++#define UNUSED GGML_UNUSED
++
++#if defined(__wasm_simd128__)
++#include <wasm_simd128.h>
++
++// Combine the two dot accumulators of a 4-column interleaved group
++// into one per-column i32x4: dl carries column 0/1 partial pairs,
++// dh columns 2/3; even lanes + odd lanes = per-column sums.
++static inline v128_t repack_combine_cols(v128_t dl, v128_t dh) {
++    const v128_t even = wasm_i32x4_shuffle(dl, dh, 0, 2, 4, 6);
++    const v128_t odd  = wasm_i32x4_shuffle(dl, dh, 1, 3, 5, 7);
++    return wasm_i32x4_add(even, odd);
++}
++
++// Four consecutive f16 scales widened through the f32<-f16 lookup
++// table into one f32x4. The per-lane table build (and the scalar
++// table read for the activation scale) is deliberate: it is the
++// exact load/shift/load idiom the transpiler's kernel fusion
++// absorbs — the four-lane group collapses to a single native
++// half-to-float widen inside the fused region, with no vector
++// constants competing for argument registers.
++static inline v128_t repack_f16x4(const ggml_half * p) {
++    return wasm_f32x4_make(GGML_CPU_FP16_TO_FP32(p[0]),
++                           GGML_CPU_FP16_TO_FP32(p[1]),
++                           GGML_CPU_FP16_TO_FP32(p[2]),
++                           GGML_CPU_FP16_TO_FP32(p[3]));
++}
++
++// Per-block scale vector: the four interleaved columns' f16 scales
++// widened to f32 and pre-multiplied by the activation row's scale.
++static inline v128_t repack_scale_vec(const ggml_half * d, float da) {
++    return wasm_f32x4_mul(repack_f16x4(d), wasm_f32x4_splat(da));
++}
++#endif // __wasm_simd128__
++
++// noinline: inlined into the mul_mat driver these bodies land in a
++// huge function where the transpiler's loop fusion cannot claim the
++// block loops; standalone they fuse like the vec_dot kernels.
++__attribute__((noinline, export_name("dbg_gemv_q8_0_4x4")))
++void ggml_gemv_q8_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx,
++                             const void * GGML_RESTRICT vy, int nr, int nc) {
++    const int qk = QK8_0;
++    const int nb = n / qk;
++
++    assert(nr == 1);
++    assert(n % qk == 0);
++    assert(nc % 4 == 0);
++
++    UNUSED(bs);
++    UNUSED(nr);
++
++#if defined(__wasm_simd128__)
++    const block_q8_0 * GGML_RESTRICT a_ptr = (const block_q8_0 *) vy;
++    for (int x = 0; x < nc / 4; x++) {
++        const block_q8_0x4 * GGML_RESTRICT b_ptr = (const block_q8_0x4 *) vx + (x * nb);
++
++        v128_t sumv = wasm_f32x4_splat(0.0f);
++        // Pointer-bump countdown form: the block loop must reach the
++        // transpiler as a countdown over bumped pointers (index-form
++        // loops keep an up-counter for addressing and stay out of
++        // loop fusion). One 16-byte weight group per unrolled step,
++        // [col j][i 0..3]; the matching four activation bytes ride a
++        // broadcast so every column sees the same activation lane.
++        const block_q8_0x4 * GGML_RESTRICT bp = b_ptr;
++        const block_q8_0 * GGML_RESTRICT  ap = a_ptr;
++        for (int l = nb; l > 0; l--) {
++            v128_t acc_lo = wasm_i32x4_splat(0);
++            v128_t acc_hi = wasm_i32x4_splat(0);
++#pragma clang loop unroll(full)
++            for (int k = 0; k < 8; k++) {
++                const v128_t bg = wasm_v128_load(bp->qs + k * 16);
++                const v128_t ag = wasm_v128_load32_splat(ap->qs + k * 4);
++                acc_lo = wasm_i32x4_add(acc_lo, wasm_i32x4_dot_i16x8(wasm_i16x8_extend_low_i8x16(bg),
++                                                                     wasm_i16x8_extend_low_i8x16(ag)));
++                acc_hi = wasm_i32x4_add(acc_hi, wasm_i32x4_dot_i16x8(wasm_i16x8_extend_high_i8x16(bg),
++                                                                     wasm_i16x8_extend_high_i8x16(ag)));
++            }
++            const v128_t sums  = repack_combine_cols(acc_lo, acc_hi);
++            const v128_t scale = repack_scale_vec(bp->d, GGML_CPU_FP16_TO_FP32(ap->d));
++            sumv = wasm_f32x4_add(sumv, wasm_f32x4_mul(wasm_f32x4_convert_i32x4(sums), scale));
++            bp++;
++            ap++;
++        }
++        wasm_v128_store(s + x * 4, sumv);
++    }
++#else
++    ggml_gemv_q8_0_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
++#endif
++}
++
++__attribute__((noinline, export_name("dbg_gemm_q8_0_4x4")))
++void ggml_gemm_q8_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx,
++                             const void * GGML_RESTRICT vy, int nr, int nc) {
++    const int qk = QK8_0;
++    const int nb = n / qk;
++
++    assert(n % qk == 0);
++    assert(nr % 4 == 0);
++    assert(nc % 4 == 0);
++
++#if defined(__wasm_simd128__)
++    // ONE activation row per block loop, four passes per 4-row group
++    // — each pass is byte-for-byte the gemv block loop (the shape the
++    // transpiler's whole-loop fusion is proven to claim). The weight
++    // stream re-reads once per row; a column group's blocks fit in L1.
++    for (int y = 0; y < nr / 4; y++) {
++        const block_q8_0x4 * GGML_RESTRICT a_ptr = (const block_q8_0x4 *) vy + (y * nb);
++        for (int x = 0; x < nc / 4; x++) {
++            const block_q8_0x4 * GGML_RESTRICT b_ptr = (const block_q8_0x4 *) vx + (x * nb);
++#pragma clang loop unroll(full)
++            for (int row = 0; row < 4; row++) {
++                v128_t sumv = wasm_f32x4_splat(0.0f);
++                const block_q8_0x4 * GGML_RESTRICT bp = b_ptr;
++                const block_q8_0x4 * GGML_RESTRICT apb = a_ptr;
++                // Opaque per-pass pointers: without this clang CSEs
++                // address/scale subexpressions ACROSS the unrolled row
++                // passes, and a value shared between two block loops
++                // can be absorbed by neither (it stays a hoist-refusing
++                // intervener). Each pass must be self-contained for the
++                // transpiler's whole-loop fusion to claim it.
++                __asm__("" : "+r"(bp), "+r"(apb));
++                for (int l = nb; l > 0; l--) {
++                    v128_t acc_lo = wasm_i32x4_splat(0);
++                    v128_t acc_hi = wasm_i32x4_splat(0);
++#pragma clang loop unroll(full)
++                    for (int k = 0; k < 8; k++) {
++                        // One 16-byte weight group [col j][i 0..3]
++                        // against this row's 4-byte group.
++                        const v128_t b16 = wasm_v128_load(bp->qs + k * 16);
++                        const v128_t ag  = wasm_v128_load32_splat(apb->qs + k * 16 + row * 4);
++                        acc_lo = wasm_i32x4_add(acc_lo, wasm_i32x4_dot_i16x8(wasm_i16x8_extend_low_i8x16(b16),
++                                                                             wasm_i16x8_extend_low_i8x16(ag)));
++                        acc_hi = wasm_i32x4_add(acc_hi, wasm_i32x4_dot_i16x8(wasm_i16x8_extend_high_i8x16(b16),
++                                                                             wasm_i16x8_extend_high_i8x16(ag)));
++                    }
++                    const v128_t sums  = repack_combine_cols(acc_lo, acc_hi);
++                    const v128_t scale = repack_scale_vec(bp->d, GGML_CPU_FP16_TO_FP32(apb->d[row]));
++                    sumv = wasm_f32x4_add(sumv, wasm_f32x4_mul(wasm_f32x4_convert_i32x4(sums), scale));
++                    bp++;
++                    apb++;
++                }
++                wasm_v128_store(s + (y * 4 + row) * bs + x * 4, sumv);
++            }
++        }
++    }
++#else
++    ggml_gemm_q8_0_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
++#endif
++}
+diff --git a/ggml/src/ggml-cpu/repack.cpp b/ggml/src/ggml-cpu/repack.cpp
+index 9689ca3ce..f8b05cce7 100644
+--- a/ggml/src/ggml-cpu/repack.cpp
++++ b/ggml/src/ggml-cpu/repack.cpp
+@@ -4707,6 +4707,11 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
+                 return &q8_0_4x4_q8_0;
+             }
+         }
++#if defined(__wasm_simd128__)
++        if (cur->ne[1] % 4 == 0) {
++            return &q8_0_4x4_q8_0;
++        }
++#endif
+         if (ggml_cpu_has_riscv_v()) {
+             #if defined __riscv_zvfh
+             switch (__riscv_vlenb() * 8) {

@@ -36,5 +36,23 @@ if [ ! -d "$HERE/llama.cpp/ggml" ]; then
   exit 1
 fi
 
+# Apply the project's llama.cpp patches: sources the upstream tree does
+# not carry (the wasm q8_0 repack kernels). Idempotent — a fresh
+# checkout applies each patch, a tree that already has it is left
+# alone, and anything in between is an error rather than a silent
+# half-patched build.
+for p in "$HERE"/patches/*.patch; do
+  [ -e "$p" ] || continue
+  if git -C "$HERE/llama.cpp" apply --check "$p" 2>/dev/null; then
+    git -C "$HERE/llama.cpp" apply "$p"
+    echo "== applied patch: $(basename "$p")"
+  elif git -C "$HERE/llama.cpp" apply --reverse --check "$p" 2>/dev/null; then
+    echo "== patch already applied: $(basename "$p")"
+  else
+    echo "patch does not apply cleanly: $p" >&2
+    exit 1
+  fi
+done
+
 echo "== wasi sdk:  $WASI_SDK_PATH"
 bash "$HERE/scripts/build-eh-runtimes.sh"
