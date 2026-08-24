@@ -119,7 +119,7 @@ WASMIFY_PIPELINE = \
 # protoc-gen-wasmify-go mid-transpile on a wasm this size and reports only
 # "signal: killed".
 
-.PHONY: all wasm wasm-clean deps-clean tools bundle-gomod smoke shell image-pull help
+.PHONY: all wasm wasm-clean deps-clean tools bundle-gomod verify-f16-table smoke shell image-pull help
 
 all: wasm
 
@@ -141,17 +141,19 @@ tools:
 # the measured production configuration. Override on the make
 # command line to build variants (e.g. WASM2GO_FAST_MATH=).
 #
-# The table address MOVES whenever the wasm's data layout shifts
-# (any bridge or llama.cpp change, including patches/). After a
-# rebuild, re-derive it from the transpiled output: the repack scale
-# gathers pass the table base as the load32_splat memarg offset, so
-# it reads directly off those call sites (one distinct value across
-# every site — a tie or an empty match means the layout changed in a
-# way that needs a human look, not a guess):
-#   grep -rhoE 'load32_splat\(m, [^,]+, int64\([0-9]{7,9}\)\)' build/wasm2go/internal/wasm2go/p*/p*_pure.go | grep -oE 'int64\([0-9]+\)\)$' | sort | uniq -c
-# wasm2go warns at transpile time when the asserted address
-# matches no gather site.
-WASM2GO_F16_TABLE ?= 8798368
+# The table address MOVES whenever the wasm's data layout shifts —
+# any bridge or llama.cpp change (including patches/), and ALSO the
+# build's incremental-cache state: a warm rebuild can lay the data
+# out differently from a clean one, so ALWAYS derive this from the
+# same kind of build that releases (a clean pipeline run), never
+# from a locally cached tree. A stale assert does not fail the
+# transpile by itself; it silently disables every table-verified
+# rewrite (the v0.2.1 release shipped ~35% slower decode this way).
+# `make verify-f16-table` (run by CI right after the bundle step)
+# re-derives the address from the transpiled output — the repack
+# scale gathers pass the table base as the load32_splat memarg
+# offset — and FAILS on any mismatch, printing the value to adopt.
+WASM2GO_F16_TABLE ?= 8793040
 # The outlining threshold is width-dependent: memory64 modules carry
 # i64 locals that double the packed-boundary round-trip cost, and the
 # measured optimum moves from 100 (wasm32) to 400 (wasm64) — tg +12%
@@ -190,6 +192,26 @@ wasm:
 		-e WASMIFY_NON_INTERACTIVE=1 $(WASM2GO_ENV) \
 		$(IMAGE) \
 		bash -c '$(WASMIFY_PIPELINE)$(WASM2GO_UNREPLACE)'
+	$(MAKE) verify-f16-table
+
+# A stale WASM2GO_F16_TABLE does not fail the transpile; it silently
+# disables every table-verified rewrite. Re-derive the address from
+# the bundle the pipeline just wrote — the repack scale gathers pass
+# the table base as the load32_splat memarg offset (the only 7+ digit
+# offset at those sites) — and fail loudly on mismatch or ambiguity.
+verify-f16-table:
+	@actual=$$(grep -rhoE 'load32_splat\(m, [^,]+, int64\([0-9]{7,9}\)\)' $(WASM2GO_BUNDLE_DIR)/p*/p*_pure.go \
+		| grep -oE '[0-9]{7,9}' | sort -u); \
+	if [ -z "$$actual" ]; then \
+		echo "verify-f16-table: no gather splat sites found in $(WASM2GO_BUNDLE_DIR) — layout or kernel shape changed" >&2; \
+		exit 1; \
+	fi; \
+	if [ "$$actual" != "$(WASM2GO_F16_TABLE)" ]; then \
+		echo "verify-f16-table: asserted WASM2GO_F16_TABLE=$(WASM2GO_F16_TABLE) but the bundle's gather sites use: $$actual" >&2; \
+		echo "verify-f16-table: update WASM2GO_F16_TABLE in the Makefile to the bundle value and rebuild" >&2; \
+		exit 1; \
+	fi; \
+	echo "verify-f16-table: OK ($$actual)"
 
 # Build and run the bridge smoke test: llama_api.cc plus a plain WASI main,
 # linked with wasi-sdk and run under a wasm runtime — no wasmify, no wasm2go,

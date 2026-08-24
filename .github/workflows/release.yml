@@ -141,6 +141,7 @@ jobs:
             eval "$(make -s print-wasm2go-env)"
             buf generate --timeout 0
             make bundle-gomod
+            make verify-f16-table
           '
 
       - name: Stop build container
