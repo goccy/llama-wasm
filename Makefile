@@ -142,14 +142,16 @@ tools:
 # command line to build variants (e.g. WASM2GO_FAST_MATH=).
 #
 # The table address MOVES whenever the wasm's data layout shifts
-# (any bridge or llama.cpp change). After a rebuild, re-derive it
-# from the transpiled output — the f16 gather sites compute
-# `extract_lane(...)<<2 + <base>`, so the base is the dominant
-# 7-digit int32 constant in the bundle:
-#   grep -oh 'int32(9[0-9]\{6\})' build/wasm2go/internal/wasm2go/p0/p0_pure.go | sort | uniq -c | sort -rn | head -3
+# (any bridge or llama.cpp change, including patches/). After a
+# rebuild, re-derive it from the transpiled output: the repack scale
+# gathers pass the table base as the load32_splat memarg offset, so
+# it reads directly off those call sites (one distinct value across
+# every site — a tie or an empty match means the layout changed in a
+# way that needs a human look, not a guess):
+#   grep -rhoE 'load32_splat\(m, [^,]+, int64\([0-9]{7,9}\)\)' build/wasm2go/internal/wasm2go/p*/p*_pure.go | grep -oE 'int64\([0-9]+\)\)$' | sort | uniq -c
 # wasm2go warns at transpile time when the asserted address
 # matches no gather site.
-WASM2GO_F16_TABLE ?= 9331984
+WASM2GO_F16_TABLE ?= 8798368
 # The outlining threshold is width-dependent: memory64 modules carry
 # i64 locals that double the packed-boundary round-trip cost, and the
 # measured optimum moves from 100 (wasm32) to 400 (wasm64) — tg +12%
@@ -166,12 +168,17 @@ WASM2GO_TUNING = \
 	WASM2GO_FUSE_LOOP_UNROLL=4 \
 	WASM2GO_F16_TABLE=$(WASM2GO_F16_TABLE) \
 	WASM2GO_FAST_MATH=$(WASM2GO_FAST_MATH) \
-	WASM2GO_VEC_DOT_PAIR_ENTRY=$(WASM2GO_VEC_DOT_PAIR_ENTRY)
+	WASM2GO_VEC_DOT_PAIR_ENTRY=$(WASM2GO_VEC_DOT_PAIR_ENTRY) \
+	WASM2GO_VEC_DOT_ROWS=$(WASM2GO_VEC_DOT_ROWS)
 WASM2GO_ENV ?= $(addprefix -e ,$(WASM2GO_TUNING))
 WASM2GO_FAST_MATH ?= 1
 # The trait-table entry whose self vec_dot pairs rows/columns
 # (wasm2go -vec-dot-pair-entry). 8 is this project's q8_0 type id.
 WASM2GO_VEC_DOT_PAIR_ENTRY ?= 8
+# Batch the verified vec_dot's caller row loops through a row-looped
+# companion (wasm2go -vec-dot-rows). Ignored by wasmify images that
+# predate the option.
+WASM2GO_VEC_DOT_ROWS ?= 1
 
 print-wasm2go-env:
 	@for v in $(WASM2GO_TUNING); do echo "export $$v"; done
