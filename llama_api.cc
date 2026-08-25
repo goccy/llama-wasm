@@ -281,8 +281,10 @@ struct CtxState {
     // threadpool is the persistent ggml worker pool attached to the context
     // in a threads build. Without one, ggml creates and destroys a disposable
     // pool — n_threads-1 thread spawns plus joins — for EVERY graph, i.e.
-    // for every generated token. Workers here spin between graphs (ggml's
-    // poll budget) and go to sleep shortly after a request completes.
+    // for every generated token. The pool runs with poll=0 (see ctx_new):
+    // workers park as soon as a graph completes and are woken per graph,
+    // which is cheap on the goroutine host and keeps idle contexts from
+    // spinning on cores the decoding context needs.
     struct ggml_threadpool *threadpool = nullptr;
     // hist mirrors the tokens whose KV entries are materialized in the
     // context, in position order — what a cache_prompt generate matches the
@@ -563,6 +565,12 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
         if (c != nullptr && cp.n_threads > 1) {
             struct ggml_threadpool_params tpp =
                 ggml_threadpool_params_default(cp.n_threads);
+            // No polling between graphs: on the goroutine host a parked
+            // worker wakes in microseconds (channel notify), while the default
+            // poll budget spins 1024*128*50 rounds after every graph and, with
+            // one pool per context, steals cores from the context that is
+            // actually decoding.
+            tpp.poll = 0;
             tp = ggml_threadpool_new(&tpp);
             if (tp != nullptr) {
                 llama_attach_threadpool(c, tp, tp);
