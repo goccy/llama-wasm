@@ -1,7 +1,7 @@
 # Container image shipping every toolchain wasmify needs (wasi-sdk + binaryen +
 # buf + the wasmify CLI itself). Override locally to pin a SHA or to iterate on a
 # wasmify branch — e.g. `make wasm IMAGE=localhost:5001/wasmify:local`.
-IMAGE ?= ghcr.io/goccy/wasmify:v0.6.6
+IMAGE ?= ghcr.io/goccy/wasmify:v0.6.7
 
 # Resource limits for the container that runs the pipeline. A full llama.cpp +
 # ggml wasm build peaks well under MEMORY; CPUS bounds the build's parallelism.
@@ -188,20 +188,25 @@ wasm:
 smoke:
 	bash scripts/run-smoke.sh
 
-# Prove the built wasm reflects every patch scripts/wasi-configure.sh
-# applies. "applied patch" in a build log is not evidence — a stale object
-# cache once shipped a release compiled from unpatched sources — so every
-# patches/*.patch must register an artifact-level check (or an explicit,
-# reasoned exemption) in scripts/verify-patches, and an unregistered patch
-# fails the run. Pure Go over the wasm binary, no external tooling; CI
-# calls exactly this target, and it audits any module directly, e.g. a
-# downloaded release asset:
-#   make verify-patches WASM_OUTPUT=llama.wasm
+# Prove the built artifacts reflect the source patches and toolchain
+# invariants. "applied patch" in a build log is not evidence — a stale
+# object cache once shipped a release compiled from unpatched sources —
+# so every patches/*.patch must register an artifact-level check (or an
+# explicit, reasoned exemption) in scripts/verify-patches, and an
+# unregistered patch fails the run. With BUNDLE_DIR set (the default
+# after a pipeline run) it also checks the transpiler invariant: the
+# wasm's bare atomic spin loops must come out guarded in the emitted
+# bundle (wasm2go >= v0.5.7 — an unguarded bundle livelocks the Go GC).
+# Pure Go over the artifacts, no external tooling; CI calls exactly this
+# target, and it audits release assets directly:
+#   make verify-patches WASM_OUTPUT=llama.wasm BUNDLE_DIR=path/to/bundle
 WASM_OUTPUT ?= .wasmify/wasm-build/output/llama.wasm
+BUNDLE_DIR  ?= build/wasm2go/internal/wasm2go
 
 verify-patches:
 	go -C scripts/verify-patches run . \
-		-wasm $(abspath $(WASM_OUTPUT)) -patches $(CURDIR)/patches
+		-wasm $(abspath $(WASM_OUTPUT)) -patches $(CURDIR)/patches \
+		$(if $(BUNDLE_DIR),-bundle $(abspath $(BUNDLE_DIR)))
 
 # Write go.mod into the wasm2go bundle so the released tarball is a
 # self-contained Go module. Parses bridge.Wasm2GoImportPath out of wasmify.json

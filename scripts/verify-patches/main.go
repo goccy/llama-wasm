@@ -1,5 +1,5 @@
-// verify-patches proves the built llama.wasm reflects every source patch
-// scripts/wasi-configure.sh applies.
+// verify-patches proves the built artifacts reflect the project's source
+// patches and the toolchain invariants they rely on.
 //
 // Applying a patch and compiling it are different events: a stale object
 // cache once shipped a release whose build log printed "applied patch"
@@ -10,10 +10,19 @@
 // fails the run — adding a patch without deciding how it is verified is
 // itself the error this tool exists to catch.
 //
-// Usage: verify-patches -wasm <llama.wasm> -patches <patches-dir>
+// Beyond the patches, one toolchain invariant is checked when -bundle is
+// given: the wasm legitimately contains bare atomic spin loops
+// (ggml_barrier's waits — no guest patch touches them any more), and the
+// wasm2go transpiler inside the pinned wasmify image is responsible for
+// guarding every one of them with a preemption point. A bundle emitted
+// without those guards livelocks the Go GC under load, so an image bump
+// to a transpiler that lost the guard must fail here, not in production.
+//
+// Usage: verify-patches -wasm <llama.wasm> -patches <patches-dir> [-bundle <dir>]
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -31,14 +40,6 @@ type verification struct {
 }
 
 var registry = map[string]verification{
-	// cpu_relax -> sched_yield: every ggml spin-wait must contain a call,
-	// or it livelocks against the Go GC on the wasm2go host (a call-free
-	// loop is lowered to assembly the runtime cannot async-preempt, so a
-	// spinning worker blocks stop-the-world while the worker it waits for
-	// stays parked). The artifact check is that no loop reaches its
-	// back-branch having done an atomic load but no call.
-	"wasm-spin-sched-yield.patch": {verify: verifyPreemptibleSpins},
-
 	// The q8_0 repack kernels change numeric routing, not a structural
 	// property this tool can read off the binary; their effect is pinned
 	// by go-llama's repack numeric tests, which run against every
@@ -48,26 +49,51 @@ var registry = map[string]verification{
 	},
 }
 
-func verifyPreemptibleSpins(wasm []byte) error {
+// verifyBundleSpinGuards is the toolchain-invariant check behind
+// -bundle: when the wasm contains bare atomic spin loops (it does — the
+// former guest-side sched-yield patch is gone by design), the wasm2go
+// transpiler must have planted its preemption guards in the emitted
+// bundle. The marker is the guard counter the emitters declare next to
+// every guarded loop; its absence means the pinned image transpiles
+// spin loops the Go runtime cannot preempt after asm capture.
+func verifyBundleSpinGuards(wasm []byte, bundleDir string) error {
 	spins, err := scanBareSpins(wasm)
 	if err != nil {
 		return err
 	}
 	if len(spins) == 0 {
+		// Nothing to guard: the invariant holds vacuously.
 		return nil
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d bare atomic spin loop(s) — non-preemptible on the wasm2go host:\n", len(spins))
-	for _, s := range spins {
-		fmt.Fprintf(&b, "    %s\n", s)
+	guarded := 0
+	err = filepath.WalkDir(bundleDir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") {
+			return err
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		guarded += bytes.Count(data, []byte("__spinGuard"))
+		return nil
+	})
+	if err != nil {
+		return err
 	}
-	b.WriteString("    was the patch compiled in, or did an upstream change add a spin site it does not reach?")
-	return fmt.Errorf("%s", b.String())
+	if guarded == 0 {
+		return fmt.Errorf("the wasm has %d bare atomic spin loop(s) but the bundle carries no spin guards — "+
+			"the pinned wasmify image's wasm2go does not guard bare spins (needs >= v0.5.7); "+
+			"such a bundle livelocks the Go GC under multi-threaded load", len(spins))
+	}
+	fmt.Printf("ok   transpiler spin guards (%d bare wasm spin loops, %d guard markers in the bundle)\n",
+		len(spins), guarded)
+	return nil
 }
 
 func run() error {
 	wasmPath := flag.String("wasm", "", "built wasm module to verify")
 	patchesDir := flag.String("patches", "", "directory of the applied patches")
+	bundleDir := flag.String("bundle", "", "emitted wasm2go bundle to check the transpiler spin guards in (empty skips the check)")
 	flag.Parse()
 	if *wasmPath == "" || *patchesDir == "" {
 		return fmt.Errorf("both -wasm and -patches are required")
@@ -105,6 +131,14 @@ func run() error {
 				fmt.Printf("ok   %s\n", name)
 			}
 		}
+	}
+	if *bundleDir != "" {
+		if err := verifyBundleSpinGuards(wasm, *bundleDir); err != nil {
+			failures++
+			fmt.Printf("FAIL transpiler spin guards: %v\n", err)
+		}
+	} else {
+		fmt.Println("note transpiler spin-guard check skipped (no -bundle)")
 	}
 	for name := range registry {
 		if !slicesContainsBase(patches, name) {
