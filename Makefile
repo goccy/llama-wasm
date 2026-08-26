@@ -119,7 +119,7 @@ WASMIFY_PIPELINE = \
 # protoc-gen-wasmify-go mid-transpile on a wasm this size and reports only
 # "signal: killed".
 
-.PHONY: all wasm wasm-clean deps-clean tools bundle-gomod smoke shell image-pull help
+.PHONY: all wasm wasm-clean deps-clean tools bundle-gomod smoke verify-patches shell image-pull help
 
 all: wasm
 
@@ -188,6 +188,21 @@ wasm:
 smoke:
 	bash scripts/run-smoke.sh
 
+# Prove the built wasm reflects every patch scripts/wasi-configure.sh
+# applies. "applied patch" in a build log is not evidence — a stale object
+# cache once shipped a release compiled from unpatched sources — so every
+# patches/*.patch must register an artifact-level check (or an explicit,
+# reasoned exemption) in scripts/verify-patches, and an unregistered patch
+# fails the run. Pure Go over the wasm binary, no external tooling; CI
+# calls exactly this target, and it audits any module directly, e.g. a
+# downloaded release asset:
+#   make verify-patches WASM_OUTPUT=llama.wasm
+WASM_OUTPUT ?= .wasmify/wasm-build/output/llama.wasm
+
+verify-patches:
+	go -C scripts/verify-patches run . \
+		-wasm $(abspath $(WASM_OUTPUT)) -patches $(CURDIR)/patches
+
 # Write go.mod into the wasm2go bundle so the released tarball is a
 # self-contained Go module. Parses bridge.Wasm2GoImportPath out of wasmify.json
 # with grep+sed (no jq in the image; no Go toolchain needed — a literal manifest).
@@ -238,6 +253,7 @@ help:
 	@echo 'Targets:'
 	@echo '  wasm         Build llama.wasm + wasm2go bundle inside $(IMAGE)'
 	@echo '  smoke        Build and run the bridge smoke test (no Go involved)'
+	@echo '  verify-patches  Check the built wasm reflects every patches/*.patch'
 	@echo '  wasm-clean   Drop generated artefacts; keep committed inputs and deps/'
 	@echo '  deps-clean   Drop deps/ (the EH-enabled C++ runtimes)'
 	@echo '  shell        Interactive shell in $(IMAGE) with the project mounted'

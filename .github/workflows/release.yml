@@ -22,16 +22,10 @@ name: release
 # means a tag push runs this workflow alone (no double build, no race).
 #
 # The toolchain (wasi-sdk, binaryen, buf, the wasmify CLI) lives inside the
-# wasmify base image, so the build runs entirely in a container. Unlike
-# build.yml, NO build cache is restored here: a release always compiles
-# every object from the tagged source. That is the generic guarantee that
-# whatever the tree configures — every patches/*.patch, present and future —
-# is what the shipped artifact was compiled from; incremental-build machinery
-# and its invalidation bugs are structurally out of the trust path. (v0.2.4
-# shipped without a new patch because a warm object cache went stale.)
-# Releases are rare, so the extra ~25 minutes is a fair price.
-# `docker run` (not the GHA `container:` directive) so a free-disk-space step
-# can run on the host before the container starts.
+# wasmify base image, so the build runs entirely in a container; the
+# project-specific cache image (pushed by build.yml on main) is read for warmth
+# when present. `docker run` (not the GHA `container:` directive) so a
+# free-disk-space step can run on the host before the container starts.
 
 on:
   push:
@@ -40,12 +34,16 @@ on:
 
 permissions:
   contents: write          # create the GitHub Release + upload assets
+  packages: read           # read the cache image from ghcr (never pushed here)
   id-token: write          # actions/attest-build-provenance OIDC token
   attestations: write
 
 env:
-  # Pinned to a released wasmify image.
+  # Pinned to a released wasmify image. The cache image inherits this base layer
+  # via `docker commit`, and the tag is baked into the cache key so a wasmify
+  # upgrade rolls forward cleanly (a bumped tag misses the old cache and rebuilds).
   WASMIFY_IMAGE: ghcr.io/goccy/wasmify:v0.6.6
+  CACHE_IMAGE: ghcr.io/${{ github.repository_owner }}/llama-wasm-cache
 
 jobs:
   build:
@@ -66,14 +64,70 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Pull the wasmify build image
-        run: docker pull "$WASMIFY_IMAGE"
+      - name: Resolve cache image tag from wasmify version, submodule SHA, and patch inputs
+        id: cache_key
+        run: |
+          submodule_sha=$(git -C llama.cpp rev-parse HEAD)
+          wasmify_tag="${WASMIFY_IMAGE##*:}"
+          if [ -z "$wasmify_tag" ] || [ "$wasmify_tag" = "$WASMIFY_IMAGE" ]; then
+            wasmify_tag="untagged"
+          fi
+          # The submodule SHA alone does not identify the compiled sources:
+          # scripts/wasi-configure.sh rewrites the checked-out submodule with
+          # patches/*.patch before the build, so those files are cache-key
+          # inputs too. When they were not, a new patch hit a stale object
+          # cache and a release shipped compiled from unpatched sources while
+          # the build log still said "applied patch".
+          patch_hash=$({ cat scripts/wasi-configure.sh; cat patches/*.patch 2>/dev/null || true; } \
+            | sha256sum | cut -c1-12)
+          echo "tag=${CACHE_IMAGE}:${wasmify_tag}-${submodule_sha}-${patch_hash}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Try to pull cache image
+        # `docker pull` exits non-zero on a missing tag; a miss is not a failure,
+        # downstream steps branch on the recorded `hit` flag.
+        id: cache_pull
+        continue-on-error: true
+        run: |
+          if docker pull "${{ steps.cache_key.outputs.tag }}"; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore generated files from cache image (warm path)
+        # Cache hit: the cold build's .wasmify object cache and the EH-enabled
+        # C++ runtimes live at /cache/output in the cache image. Copy them back
+        # so wasmify's incremental detection and build-eh-runtimes.sh's version
+        # stamp can short-circuit unchanged work.
+        if: steps.cache_pull.outputs.hit == 'true'
+        run: |
+          container=$(docker create "${{ steps.cache_key.outputs.tag }}")
+          docker cp "${container}:/cache/output/." "$PWD/"
+          docker rm -f "${container}"
+          ls -la .wasmify deps/wasi-eh 2>/dev/null | head -10 || true
+
+      - name: Resolve build base image
+        id: base
+        run: |
+          if [ "${{ steps.cache_pull.outputs.hit }}" = "true" ]; then
+            echo "image=${{ steps.cache_key.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            docker pull "$WASMIFY_IMAGE"
+            echo "image=$WASMIFY_IMAGE" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Run wasmify pipeline
         # The same sequence as `make wasm`, regenerating every derived artefact
         # (build.json, api-spec.json, proto/, bridge/, the wasm2go bundle) from
-        # source — so none of them are committed. Always a cold build: see the
-        # header comment.
+        # source — so none of them are committed. Detached with `sleep infinity`
+        # so the post-build container can be `docker commit`ed (cache miss only).
         # `buf generate --timeout 0` disables buf's 2-minute plugin timeout: the
         # wasm2go flavour SSA-lowers a wasm this size over several minutes, and
         # a SIGKILL there surfaces only as "signal: killed".
@@ -82,7 +136,7 @@ jobs:
             -v "$PWD:/work" -w /work \
             -e WASMIFY_NON_INTERACTIVE=1 \
             --entrypoint sleep \
-            "$WASMIFY_IMAGE" infinity
+            "${{ steps.base.outputs.image }}" infinity
           docker exec wasmify-build bash -ceuxo pipefail '
             make tools
             bash scripts/wasi-configure.sh
@@ -96,6 +150,20 @@ jobs:
             buf generate --timeout 0
             make bundle-gomod
           '
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Verify the built wasm reflects the applied patches
+        # Every patches/*.patch must pass the artifact-level check it
+        # registers in scripts/verify-patches (an unregistered patch fails).
+        # A build log line saying "applied patch" is not evidence — a stale
+        # object cache once shipped a release compiled from unpatched
+        # sources — so the artifact itself is checked, before anything is
+        # published. Same entry point as local use: make verify-patches.
+        run: make verify-patches
 
       - name: Stop build container
         if: always()
