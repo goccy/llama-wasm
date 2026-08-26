@@ -155,17 +155,13 @@ jobs:
           go-version: stable
           cache: false
 
-      - name: Verify the built artifacts against the patches and toolchain invariants
+      - name: Verify the built wasm reflects the applied patches
         # Every patches/*.patch must pass the artifact-level check it
-        # registers in scripts/verify-patches (an unregistered patch fails),
-        # and the emitted bundle must carry wasm2go's spin guards for the
-        # wasm's bare atomic spin loops (an image bump to a transpiler
-        # without the guard would otherwise ship a bundle that livelocks
-        # the Go GC). A build log line saying "applied patch" is not
-        # evidence — a stale object cache once shipped a release compiled
-        # from unpatched sources — so the artifacts themselves are checked,
-        # before anything is published. Same entry point as local use:
-        # make verify-patches.
+        # registers in scripts/verify-patches (an unregistered patch fails).
+        # A build log line saying "applied patch" is not evidence — a stale
+        # object cache once shipped a release compiled from unpatched
+        # sources — so the artifact itself is checked, before anything is
+        # published. Same entry point as local use: make verify-patches.
         run: make verify-patches
 
       - name: Commit and push cache image
