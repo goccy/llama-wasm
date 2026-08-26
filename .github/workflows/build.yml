@@ -151,12 +151,12 @@ jobs:
           '
 
       - name: Verify spin-waits are preemptible in the built wasm
-        # Artifact-level proof that patches/wasm-spin-sched-yield.patch was
-        # actually compiled in. "applied patch" in the configure log is not
-        # evidence — a stale object cache once shipped a release built from
-        # unpatched sources. A bare (call-free) atomic spin loop livelocks
-        # against the Go GC on the wasm2go host, so the gate fails the build
-        # before anything is published. See scripts/check-bare-spins.py.
+        # Artifact invariant for the wasm2go host, in the same family as
+        # check-imports.py: a call-free atomic spin loop livelocks against the
+        # Go GC no matter which source change introduces it — an upstream
+        # llama.cpp bump adding a spin site the sched-yield patch does not
+        # reach, the patch bitrotting, or any future build bug. Fails the
+        # build before anything is published. See scripts/check-bare-spins.py.
         run: |
           # Pinned wabt release: the wasm is memory64 and Ubuntu's packaged
           # wabt (1.0.34) cannot parse 64-bit tables.
