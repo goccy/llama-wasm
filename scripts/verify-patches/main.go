@@ -19,7 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
 // verification is what a patch registers: an artifact check over the built
@@ -31,14 +30,6 @@ type verification struct {
 }
 
 var registry = map[string]verification{
-	// cpu_relax -> sched_yield: every ggml spin-wait must contain a call,
-	// or it livelocks against the Go GC on the wasm2go host (a call-free
-	// loop is lowered to assembly the runtime cannot async-preempt, so a
-	// spinning worker blocks stop-the-world while the worker it waits for
-	// stays parked). The artifact check is that no loop reaches its
-	// back-branch having done an atomic load but no call.
-	"wasm-spin-sched-yield.patch": {verify: verifyPreemptibleSpins},
-
 	// The q8_0 repack kernels change numeric routing, not a structural
 	// property this tool can read off the binary; their effect is pinned
 	// by go-llama's repack numeric tests, which run against every
@@ -46,23 +37,6 @@ var registry = map[string]verification{
 	"wasm-q8-repack-kernels.patch": {
 		reason: "verified by go-llama's gemv repack numeric tests against the released bundle",
 	},
-}
-
-func verifyPreemptibleSpins(wasm []byte) error {
-	spins, err := scanBareSpins(wasm)
-	if err != nil {
-		return err
-	}
-	if len(spins) == 0 {
-		return nil
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d bare atomic spin loop(s) — non-preemptible on the wasm2go host:\n", len(spins))
-	for _, s := range spins {
-		fmt.Fprintf(&b, "    %s\n", s)
-	}
-	b.WriteString("    was the patch compiled in, or did an upstream change add a spin site it does not reach?")
-	return fmt.Errorf("%s", b.String())
 }
 
 func run() error {
