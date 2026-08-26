@@ -64,7 +64,7 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Resolve cache image tag from wasmify version + llama.cpp submodule SHA
+      - name: Resolve cache image tag from wasmify version, submodule SHA, and patch inputs
         id: cache_key
         run: |
           submodule_sha=$(git -C llama.cpp rev-parse HEAD)
@@ -72,7 +72,15 @@ jobs:
           if [ -z "$wasmify_tag" ] || [ "$wasmify_tag" = "$WASMIFY_IMAGE" ]; then
             wasmify_tag="untagged"
           fi
-          echo "tag=${CACHE_IMAGE}:${wasmify_tag}-${submodule_sha}" >> "$GITHUB_OUTPUT"
+          # The submodule SHA alone does not identify the compiled sources:
+          # scripts/wasi-configure.sh rewrites the checked-out submodule with
+          # patches/*.patch before the build, so those files are cache-key
+          # inputs too. When they were not, a new patch hit a stale object
+          # cache and a release shipped compiled from unpatched sources while
+          # the build log still said "applied patch".
+          patch_hash=$({ cat scripts/wasi-configure.sh; cat patches/*.patch 2>/dev/null || true; } \
+            | sha256sum | cut -c1-12)
+          echo "tag=${CACHE_IMAGE}:${wasmify_tag}-${submodule_sha}-${patch_hash}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -142,6 +150,20 @@ jobs:
             buf generate --timeout 0
             make bundle-gomod
           '
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Verify the built wasm reflects the applied patches
+        # Every patches/*.patch must pass the artifact-level check it
+        # registers in scripts/verify-patches (an unregistered patch fails).
+        # A build log line saying "applied patch" is not evidence — a stale
+        # object cache once shipped a release compiled from unpatched
+        # sources — so the artifact itself is checked, before anything is
+        # published. Same entry point as local use: make verify-patches.
+        run: make verify-patches
 
       - name: Stop build container
         if: always()
