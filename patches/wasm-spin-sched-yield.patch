@@ -1,21 +1,28 @@
 diff --git a/ggml/src/ggml-cpu/ggml-cpu.c b/ggml/src/ggml-cpu/ggml-cpu.c
-index 491316f74..f4cb4ad66 100644
+index 491316f74..cc3766f97 100644
 --- a/ggml/src/ggml-cpu/ggml-cpu.c
 +++ b/ggml/src/ggml-cpu/ggml-cpu.c
-@@ -533,6 +533,17 @@ static inline void ggml_thread_cpu_relax(void) {
+@@ -533,6 +533,24 @@ static inline void ggml_thread_cpu_relax(void) {
          __asm__ __volatile__ (".4byte 0x100000F");
      #endif
  }
 +#elif defined(__wasm__)
 +// wasm has no pause hint, and the host (wasm2go) runs each guest thread on a
 +// goroutine: a call-free spin loop is lowered to assembly the Go runtime
-+// cannot preempt, so the bare spin in ggml_barrier deadlocks against a
++// cannot async-preempt, so a bare spin in ggml_barrier livelocks against a
 +// stop-the-world (a worker already parked by the GC never reaches the
-+// barrier the spinners wait for). sched_yield reaches the host scheduler
-+// (runtime.Gosched): the spin becomes preemptible and the core goes to the
-+// thread the barrier is waiting for.
++// barrier the spinners wait for). The sched_yield call keeps the loop out of
++// that lowering and reaches the host scheduler (runtime.Gosched) — but
++// yielding on every iteration costs ~3.4x decode latency at n_threads=8,
++// the waiting workers endlessly round-tripping through the run queue.
++// Yield on every 1024th relax instead: the fast path is a thread-local
++// increment, the spin stays preemptible, and a waiting worker still reaches
++// the scheduler every few microseconds.
 +static inline void ggml_thread_cpu_relax(void) {
-+    sched_yield();
++    static _Thread_local unsigned ggml_spin_count;
++    if ((++ggml_spin_count & 1023) == 0) {
++        sched_yield();
++    }
 +}
  #else
  static inline void ggml_thread_cpu_relax(void) {;}
