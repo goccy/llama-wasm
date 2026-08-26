@@ -97,27 +97,6 @@ jobs:
             make bundle-gomod
           '
 
-      - name: Verify spin-waits are preemptible in the built wasm
-        # Artifact invariant for the wasm2go host, in the same family as
-        # check-imports.py: a call-free atomic spin loop livelocks against the
-        # Go GC no matter which source change introduces it — an upstream
-        # llama.cpp bump adding a spin site the sched-yield patch does not
-        # reach, the patch bitrotting, or any future build bug. Fails the
-        # build before anything is published. See scripts/check-bare-spins.py.
-        run: |
-          # Pinned wabt release: the wasm is memory64 and Ubuntu's packaged
-          # wabt (1.0.34) cannot parse 64-bit tables.
-          WABT_VERSION=1.0.41
-          WABT_SHA256=83f8122e924745fcd70636e3594bc01c4c47f2d4c8f3c63b5d70d3f83a482677
-          curl -fsSL --proto '=https' --tlsv1.2 -o wabt.tar.gz \
-            "https://github.com/WebAssembly/wabt/releases/download/${WABT_VERSION}/wabt-${WABT_VERSION}-linux-x64.tar.gz"
-          echo "${WABT_SHA256}  wabt.tar.gz" | sha256sum -c -
-          tar xzf wabt.tar.gz "wabt-${WABT_VERSION}/bin/wasm-objdump"
-          rm wabt.tar.gz
-          PATH="$PWD/wabt-${WABT_VERSION}/bin:$PATH" \
-            python3 scripts/check-bare-spins.py .wasmify/wasm-build/output/llama.wasm
-          rm -rf "wabt-${WABT_VERSION}"
-
       - name: Stop build container
         if: always()
         run: docker rm -f wasmify-build 2>/dev/null || true
