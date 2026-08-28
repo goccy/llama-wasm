@@ -540,6 +540,15 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
         if (opt_num(json, len, "n_ctx", d)    && d != 0) cp.n_ctx    = (uint32_t) d;
         if (opt_num(json, len, "n_batch", d)  && d != 0) cp.n_batch  = (uint32_t) d;
         if (opt_num(json, len, "n_ubatch", d) && d != 0) cp.n_ubatch = (uint32_t) d;
+        // n_seq_max > 1 turns on the unified KV cache: n_ctx stays the TOTAL
+        // cell budget shared by all sequences (not per-sequence slices), and
+        // llama_memory_seq_cp shares cells instead of copying them — which
+        // is what llama_ctx_score_choices' batched scoring relies on, its
+        // sequences all sharing the stem prefix.
+        if (opt_num(json, len, "n_seq_max", d) && d > 1) {
+            cp.n_seq_max  = (uint32_t) d;
+            cp.kv_unified = true;
+        }
         // A single-threaded wasm build has no usable pthread_create: ggml
         // asserts if asked for more than one thread, so clamp rather than
         // trap. A threads build honours the request.
@@ -1466,6 +1475,196 @@ std::string llama_ctx_score(uint64_t ctx, const char *text, uint32_t text_len) {
         return json_err(std::string("score: ") + e.what());
     } catch (...) {
         return json_err("score: unknown error");
+    }
+}
+
+namespace {
+
+// log_softmax_at returns log P(token | logits) with the usual max-shift for
+// numerical stability.
+double log_softmax_at(const float *logits, int n_vocab, llama_token token) {
+    float maxv = logits[0];
+    for (int v = 1; v < n_vocab; v++) {
+        if (logits[v] > maxv) maxv = logits[v];
+    }
+    double sum = 0.0;
+    for (int v = 0; v < n_vocab; v++) {
+        sum += std::exp((double) logits[v] - (double) maxv);
+    }
+    return (double) logits[token] - (double) maxv - std::log(sum);
+}
+
+} // namespace
+
+std::string llama_ctx_score_choices(uint64_t ctx, const char *choices,
+                                    uint32_t choices_len) {
+    CtxState *st = ctx_of(ctx);
+    if (st == nullptr) return json_err("null context handle");
+    try {
+        const llama_vocab *vocab = llama_model_get_vocab(st->model);
+        const int n_vocab = llama_vocab_n_tokens(vocab);
+
+        // Split the newline-separated candidate list. An empty line is an
+        // input error: it cannot be tokenized as a continuation.
+        std::vector<std::string> items;
+        {
+            std::string all(choices, choices_len);
+            size_t start = 0;
+            while (start <= all.size()) {
+                size_t nl = all.find('\n', start);
+                if (nl == std::string::npos) nl = all.size();
+                items.push_back(all.substr(start, nl - start));
+                start = nl + 1;
+            }
+            while (!items.empty() && items.back().empty()) items.pop_back();
+        }
+        if (items.empty()) return json_err("score_choices: no choices");
+
+        struct llama_memory_i *mem = llama_get_memory(st->ctx);
+        const llama_pos base = llama_memory_seq_pos_max(mem, 0) + 1;
+        if (base <= 0) return json_err("score_choices: nothing decoded yet");
+
+        // The base logits (the position predicting each choice's first
+        // token) cannot be read from the live buffer: any decode since the
+        // stem — including a previous score_choices call's own choice
+        // decodes — has clobbered it. Regenerate them deterministically by
+        // re-decoding the stem's last token in place (remove position
+        // base-1, decode the same token there again). The prefix history
+        // knows that token; without valid history the stem's tail is
+        // unknowable and the call is refused.
+        if (!st->hist_valid || st->hist.empty()) {
+            return json_err("score_choices: no prefix history "
+                            "(decode the stem with eval or generate first)");
+        }
+        const llama_token last_tok = st->hist.back();
+        llama_memory_seq_rm(mem, 0, base - 1, -1);
+        {
+            llama_batch batch = llama_batch_init(1, 0, 1);
+            batch.token[0]     = last_tok;
+            batch.pos[0]       = base - 1;
+            batch.n_seq_id[0]  = 1;
+            batch.seq_id[0][0] = 0;
+            batch.logits[0]    = 1;
+            batch.n_tokens     = 1;
+            const int rc = llama_decode(st->ctx, batch);
+            llama_batch_free(batch);
+            if (rc != 0) return json_err("score_choices: stem re-decode failed");
+        }
+        const float *live = llama_get_logits_ith(st->ctx, -1);
+        if (live == nullptr) {
+            return json_err("score_choices: no logits after stem re-decode");
+        }
+        std::vector<float> base_logits(live, live + n_vocab);
+
+        // Tokenize every choice up front; single-token choices are fully
+        // scored by the base logits and never decode.
+        std::vector<std::vector<llama_token>> toks(items.size());
+        std::vector<double> nll(items.size());
+        for (size_t c = 0; c < items.size(); c++) {
+            std::string err;
+            if (!tokenize_text(vocab, items[c], false, true, toks[c], err)) {
+                return json_err("score_choices: " + err);
+            }
+            if (toks[c].empty()) return json_err("score_choices: empty choice");
+            if (base + (llama_pos) toks[c].size() > (llama_pos) llama_n_ctx(st->ctx)) {
+                return json_err("score_choices: choice exceeds the context window");
+            }
+            nll[c] = -log_softmax_at(base_logits.data(), n_vocab, toks[c][0]);
+        }
+
+        // Teacher-force the multi-token choices. With n_seq_max > 1 the
+        // choices batch into ONE decode per group: each choice runs on its
+        // own sequence sharing the stem's cells (llama_memory_seq_cp on the
+        // unified cache is metadata, not a copy), so the per-decode fixed
+        // cost — the dominant cost of scoring many short candidates — is paid
+        // once instead of once per choice. With n_seq_max == 1 (the context
+        // default) each choice decodes on sequence 0 and rolls back, as many
+        // decodes as choices.
+        const uint32_t n_seq_max = llama_n_seq_max(st->ctx);
+        const int      n_batch   = (int) llama_n_batch(st->ctx);
+        std::vector<size_t> multi;
+        for (size_t c = 0; c < items.size(); c++) {
+            if (toks[c].size() > 1) multi.push_back(c);
+        }
+        size_t next = 0;
+        while (next < multi.size()) {
+            // One group: as many choices as spare sequences and batch room
+            // allow (always at least one, so an oversized single choice
+            // still decodes alone on sequence 0's in-place path below).
+            std::vector<size_t> group;
+            int tok_total = 0;
+            const size_t max_group = n_seq_max > 1 ? (size_t) (n_seq_max - 1) : 1;
+            while (next < multi.size() && group.size() < max_group) {
+                const int need = (int) toks[multi[next]].size() - 1;
+                if (!group.empty() && tok_total + need > n_batch) break;
+                group.push_back(multi[next]);
+                tok_total += need;
+                next++;
+            }
+            const bool seq_batched = n_seq_max > 1 && group.size() >= 1;
+            if (seq_batched) {
+                for (size_t g = 0; g < group.size(); g++) {
+                    llama_memory_seq_cp(mem, 0, (llama_seq_id) (g + 1), 0, -1);
+                }
+            }
+            llama_batch batch = llama_batch_init(std::max(tok_total, 1), 0, 1);
+            int row = 0;
+            for (size_t g = 0; g < group.size(); g++) {
+                const std::vector<llama_token> &t = toks[group[g]];
+                const llama_seq_id sid = seq_batched ? (llama_seq_id) (g + 1) : 0;
+                for (int i = 0; i + 1 < (int) t.size(); i++) {
+                    batch.token[row]     = t[i];
+                    batch.pos[row]       = base + i;
+                    batch.n_seq_id[row]  = 1;
+                    batch.seq_id[row][0] = sid;
+                    batch.logits[row]    = 1;
+                    row++;
+                }
+            }
+            batch.n_tokens = row;
+            const int rc = llama_decode(st->ctx, batch);
+            llama_batch_free(batch);
+            const auto cleanup = [&]() {
+                if (seq_batched) {
+                    for (size_t g = 0; g < group.size(); g++) {
+                        llama_memory_seq_rm(mem, (llama_seq_id) (g + 1), -1, -1);
+                    }
+                } else {
+                    llama_memory_seq_rm(mem, 0, base, -1);
+                }
+            };
+            if (rc != 0) {
+                cleanup();
+                return json_err("score_choices: decode failed");
+            }
+            row = 0;
+            for (size_t g = 0; g < group.size(); g++) {
+                const std::vector<llama_token> &t = toks[group[g]];
+                for (int i = 0; i + 1 < (int) t.size(); i++) {
+                    const float *lg = llama_get_logits_ith(st->ctx, row);
+                    if (lg == nullptr) {
+                        cleanup();
+                        return json_err("score_choices: no logits");
+                    }
+                    nll[group[g]] -= log_softmax_at(lg, n_vocab, t[i + 1]);
+                    row++;
+                }
+            }
+            cleanup();
+        }
+
+        std::string out = "{\"ok\":true,\"scores\":[";
+        for (size_t c = 0; c < items.size(); c++) {
+            if (c != 0) out.push_back(',');
+            out += "{\"n_tokens\":" + json_num((double) toks[c].size()) +
+                   ",\"nll\":" + json_num(nll[c]) + "}";
+        }
+        out += "]}";
+        return out;
+    } catch (const std::exception &e) {
+        return json_err(std::string("score_choices: ") + e.what());
+    } catch (...) {
+        return json_err("score_choices: unknown error");
     }
 }
 
