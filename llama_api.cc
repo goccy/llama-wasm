@@ -442,8 +442,8 @@ std::string llama_model_info(uint64_t model) {
     }
 }
 
-uint32_t llama_model_load_progress_addr() {
-    return (uint32_t) (uintptr_t) &g_load_progress;
+uint64_t llama_model_load_progress_addr() {
+    return (uint64_t) (uintptr_t) &g_load_progress;
 }
 
 /* ------------------------------------------------------------------- lora */
@@ -608,10 +608,41 @@ void llama_ctx_free(uint64_t ctx) {
     delete st;
 }
 
-uint32_t llama_ctx_interrupt_addr(uint64_t ctx) {
+uint64_t llama_ctx_interrupt_addr(uint64_t ctx) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return 0;
-    return (uint32_t) (uintptr_t) &st->interrupt;
+    return (uint64_t) (uintptr_t) &st->interrupt;
+}
+
+std::string llama_ctx_attach_threadpool(uint64_t ctx, uint32_t n_threads) {
+    CtxState *st = ctx_of(ctx);
+    if (st == nullptr) return json_err("null context handle");
+    if (st->ctx == nullptr) return json_err("attach_threadpool: context is closed");
+#if defined(_REENTRANT)
+    struct ggml_threadpool *tp = nullptr;
+    if (n_threads > 1) {
+        struct ggml_threadpool_params tpp =
+            ggml_threadpool_params_default((int) n_threads);
+        // No polling between graphs, matching llama_ctx_new: a parked worker
+        // wakes in microseconds on the goroutine host.
+        tpp.poll = 0;
+        tp = ggml_threadpool_new(&tpp);
+        if (tp == nullptr) return json_err("attach_threadpool: ggml_threadpool_new failed");
+    }
+    if (tp != nullptr) {
+        llama_attach_threadpool(st->ctx, tp, tp);
+    } else {
+        llama_detach_threadpool(st->ctx);
+    }
+    // Abandon, never free, the previous pool: in a forked instance its
+    // worker threads belong to the snapshot builder and cannot be joined;
+    // the struct itself lives in shared snapshot pages.
+    st->threadpool = tp;
+#else
+    (void) n_threads;
+    st->threadpool = nullptr;
+#endif
+    return "{\"ok\":true}";
 }
 
 /* -------------------------------------------------------------- tokenizer */

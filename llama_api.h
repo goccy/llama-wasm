@@ -74,7 +74,7 @@ std::string llama_model_info(uint64_t model);
 /* Address, in linear memory, of a float the loader updates with its progress
  * (0.0 .. 1.0) while llama_model_load runs. A host thread can poll it to drive
  * a progress bar. Valid for the lifetime of the wasm instance. */
-uint32_t llama_model_load_progress_addr();
+uint64_t llama_model_load_progress_addr();
 
 /* ---------------------------------------------------------------- context */
 
@@ -99,7 +99,18 @@ void llama_ctx_free(uint64_t ctx);
  * Writing a non-zero value from another thread makes the running
  * llama_ctx_generate stop at its next token and return what it has, with
  * `"interrupted":true`. The generation loop clears the flag when it starts. */
-uint32_t llama_ctx_interrupt_addr(uint64_t ctx);
+uint64_t llama_ctx_interrupt_addr(uint64_t ctx);
+
+/* Rebuild and attach the context's ggml threadpool. An instance forked
+   from a snapshot inherits the memory image of a context whose pool
+   references worker threads of the snapshot builder; those threads do not
+   exist in this process, so the next decode (or the join inside
+   llama_ctx_free) would wait forever. Call this right after forking: it
+   creates a fresh pool with n_threads workers (poll=0, as llama_ctx_new)
+   and attaches it, ABANDONING the inherited pool struct -- its memory is
+   shared snapshot pages and its dead threads cannot be joined. n_threads
+   <= 1 detaches instead. Returns {"ok":true} or an error object. */
+std::string llama_ctx_attach_threadpool(uint64_t ctx, uint32_t n_threads);
 
 /* -------------------------------------------------------------- tokenizer */
 

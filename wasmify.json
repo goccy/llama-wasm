@@ -116,6 +116,7 @@
       "llama_ctx_new",
       "llama_ctx_free",
       "llama_ctx_interrupt_addr",
+      "llama_ctx_attach_threadpool",
       "llama_tokenize",
       "llama_detokenize",
       "llama_token_to_piece",
@@ -170,7 +171,7 @@
   },
   "phases": {
     "gen-proto": {
-      "completed_at": "2026-08-21T12:54:43Z",
+      "completed_at": "2026-08-27T12:37:57Z",
       "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
       "output_files": [
         "proto/llama.proto",
@@ -180,7 +181,7 @@
       ]
     },
     "parse-headers": {
-      "completed_at": "2026-08-21T12:54:43Z",
+      "completed_at": "2026-08-27T12:37:57Z",
       "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
       "output_files": [
         "api-spec.json"
