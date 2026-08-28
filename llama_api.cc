@@ -546,10 +546,14 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
         // is what llama_ctx_score_choices' batched scoring relies on, its
         // sequences all sharing the stem prefix.
         if (opt_num(json, len, "n_seq_max", d) && d > 1) {
-            // llama.cpp rejects n_seq_max > LLAMA_MAX_SEQ (256) with a
-            // throw; refuse here with a precise message instead.
-            if (d > 256) {
-                set_error("n_seq_max must be <= 256");
+            // llama.cpp rejects n_seq_max above its sequence cap with a
+            // throw; refuse here with a precise message instead. The cap
+            // comes from the API (llama_max_parallel_sequences), not a
+            // copied constant, so it tracks upstream.
+            const double max_seq = (double) llama_max_parallel_sequences();
+            if (d > max_seq) {
+                set_error("n_seq_max must be <= " +
+                          std::to_string((size_t) max_seq));
                 return 0;
             }
             cp.n_seq_max  = (uint32_t) d;
