@@ -546,6 +546,12 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
         // is what llama_ctx_score_choices' batched scoring relies on, its
         // sequences all sharing the stem prefix.
         if (opt_num(json, len, "n_seq_max", d) && d > 1) {
+            // llama.cpp rejects n_seq_max > LLAMA_MAX_SEQ (256) with a
+            // throw; refuse here with a precise message instead.
+            if (d > 256) {
+                set_error("n_seq_max must be <= 256");
+                return 0;
+            }
             cp.n_seq_max  = (uint32_t) d;
             cp.kv_unified = true;
         }
@@ -1548,16 +1554,27 @@ std::string llama_ctx_score_choices(uint64_t ctx, const char *choices,
             batch.n_tokens     = 1;
             const int rc = llama_decode(st->ctx, batch);
             llama_batch_free(batch);
-            if (rc != 0) return json_err("score_choices: stem re-decode failed");
+            if (rc != 0) {
+                // Position base-1 was removed and its re-decode failed: the
+                // cache no longer matches the prefix history. Invalidate the
+                // history so the next call refuses instead of silently
+                // re-anchoring the stem one position short.
+                st->hist_valid = false;
+                return json_err("score_choices: stem re-decode failed "
+                                "(cache state discarded; re-decode the stem)");
+            }
         }
         const float *live = llama_get_logits_ith(st->ctx, -1);
         if (live == nullptr) {
-            return json_err("score_choices: no logits after stem re-decode");
+            st->hist_valid = false;
+            return json_err("score_choices: no logits after stem re-decode "
+                            "(cache state discarded; re-decode the stem)");
         }
         std::vector<float> base_logits(live, live + n_vocab);
 
         // Tokenize every choice up front; single-token choices are fully
         // scored by the base logits and never decode.
+        const int n_batch_max = (int) llama_n_batch(st->ctx);
         std::vector<std::vector<llama_token>> toks(items.size());
         std::vector<double> nll(items.size());
         for (size_t c = 0; c < items.size(); c++) {
@@ -1568,6 +1585,15 @@ std::string llama_ctx_score_choices(uint64_t ctx, const char *choices,
             if (toks[c].empty()) return json_err("score_choices: empty choice");
             if (base + (llama_pos) toks[c].size() > (llama_pos) llama_n_ctx(st->ctx)) {
                 return json_err("score_choices: choice exceeds the context window");
+            }
+            // A single decode carries at most n_batch tokens, and one choice
+            // never splits across decodes; refuse up front with a precise
+            // error instead of a generic decode failure below.
+            if ((int) toks[c].size() - 1 > n_batch_max) {
+                return json_err("score_choices: choice needs " +
+                                json_num((double) (toks[c].size() - 1)) +
+                                " decode tokens but n_batch is " +
+                                json_num((double) n_batch_max));
             }
             nll[c] = -log_softmax_at(base_logits.data(), n_vocab, toks[c][0]);
         }
