@@ -255,6 +255,22 @@ std::string llama_chat_apply_template(uint64_t model, const char *messages_json,
  */
 std::string llama_ctx_score(uint64_t ctx, const char *text, uint32_t text_len);
 
+/**
+ * llama_ctx_score_choices scores candidate continuations of the CURRENT
+ * cache state: `choices` is a newline-separated list of candidate texts, and
+ * for each one the call returns the negative log-likelihood of its tokens as
+ * the continuation of what the context has already decoded. Precondition:
+ * the caller has just decoded the shared stem (llama_ctx_eval or the prompt
+ * phase of generate), so the logits of the next position are live — the
+ * first token of every choice is scored from those shared logits, the rest
+ * teacher-forced. Each choice's tokens are decoded and then rolled back
+ * (llama_memory_seq_rm), so the cache — and prefix-history bookkeeping — end
+ * exactly where they started and the choices never see each other. Returns
+ * `{"ok":true,"scores":[{"n_tokens":K,"nll":X},...]}` in input order.
+ */
+std::string llama_ctx_score_choices(uint64_t ctx, const char *choices,
+                                    uint32_t choices_len);
+
 std::string llama_ctx_embed(uint64_t ctx, const char *text, uint32_t text_len,
                             int32_t normalize);
 
