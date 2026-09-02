@@ -2,7 +2,7 @@
   "version": "1.0",
   "upstream": {
     "path": "./llama.cpp",
-    "commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
+    "commit": "5e01d504e87977e2788935a89e7815f159afbbce",
     "branch": "HEAD"
   },
   "project": {
@@ -139,6 +139,10 @@
   },
   "wasm_build": {
     "keep_symbols": true,
+    "no_inline": [
+      "dbg_gemv_q8_0_4x4",
+      "dbg_gemm_q8_0_4x4"
+    ],
     "opt_level": "-O3",
     "wasm64": true,
     "extra_cxxflags": [
@@ -172,8 +176,8 @@
   },
   "phases": {
     "gen-proto": {
-      "completed_at": "2026-08-28T09:08:22Z",
-      "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
+      "completed_at": "2026-09-02T02:15:34Z",
+      "upstream_commit": "5e01d504e87977e2788935a89e7815f159afbbce",
       "output_files": [
         "proto/llama.proto",
         "proto/wasmify/options.proto",
@@ -182,8 +186,8 @@
       ]
     },
     "parse-headers": {
-      "completed_at": "2026-08-28T09:08:22Z",
-      "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
+      "completed_at": "2026-09-02T02:15:34Z",
+      "upstream_commit": "5e01d504e87977e2788935a89e7815f159afbbce",
       "output_files": [
         "api-spec.json"
       ]
