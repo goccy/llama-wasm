@@ -164,11 +164,21 @@ jobs:
         # published. Same entry point as local use: make verify-patches.
         run: make verify-patches
 
+      # The link check must run on the OLDEST Go the bundle declares
+      # (its go.mod), not on `stable`: the cross-chunk ABI-wrapper cycle
+      # that made v0.3.1 unlinkable fails on Go 1.25/1.26 and links
+      # cleanly on 1.27, so a newer toolchain here would pass a bundle
+      # that every consumer on the declared minimum cannot link.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: build/wasm2go/internal/wasm2go/go.mod
+          cache: false
+
       - name: Link a consumer against the wasm2go bundle for every asm target
         # Package builds never exercise the linker; this catches bundles
         # that compile but cannot link (ABI-wrapper cycles across chunk
         # packages) before anything is staged, attested or published.
-        run: make link-check-bundle
+        run: go version && make link-check-bundle
 
       - name: Commit and push cache image
         # Cache miss + push events only. PR runs read the cache but never write.
