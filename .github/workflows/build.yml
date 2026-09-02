@@ -164,6 +164,12 @@ jobs:
         # published. Same entry point as local use: make verify-patches.
         run: make verify-patches
 
+      - name: Link a consumer against the wasm2go bundle for every asm target
+        # Package builds never exercise the linker; this catches bundles
+        # that compile but cannot link (ABI-wrapper cycles across chunk
+        # packages) before anything is staged, attested or published.
+        run: make link-check-bundle
+
       - name: Commit and push cache image
         # Cache miss + push events only. PR runs read the cache but never write.
         # The bind-mount means /work writes are not in the committable layer, so

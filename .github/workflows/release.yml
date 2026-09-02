@@ -165,6 +165,12 @@ jobs:
         # published. Same entry point as local use: make verify-patches.
         run: make verify-patches
 
+      - name: Link a consumer against the wasm2go bundle for every asm target
+        # Package builds never exercise the linker; this catches bundles
+        # that compile but cannot link (ABI-wrapper cycles across chunk
+        # packages) before anything is staged, attested or published.
+        run: make link-check-bundle
+
       - name: Stop build container
         if: always()
         run: docker rm -f wasmify-build 2>/dev/null || true

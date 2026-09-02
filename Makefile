@@ -119,7 +119,7 @@ WASMIFY_PIPELINE = \
 # protoc-gen-wasmify-go mid-transpile on a wasm this size and reports only
 # "signal: killed".
 
-.PHONY: all wasm wasm-clean deps-clean tools bundle-gomod smoke verify-patches shell image-pull help
+.PHONY: all wasm wasm-clean deps-clean tools bundle-gomod link-check-bundle smoke verify-patches shell image-pull help
 
 all: wasm
 
@@ -206,6 +206,20 @@ verify-patches:
 # Write go.mod into the wasm2go bundle so the released tarball is a
 # self-contained Go module. Parses bridge.Wasm2GoImportPath out of wasmify.json
 # with grep+sed (no jq in the image; no Go toolchain needed — a literal manifest).
+# Link a consumer binary against the generated wasm2go bundle for every
+# asm target (linux/arm64, linux/amd64 v2, linux/amd64 v1) before it is
+# published. Compiling the bundle's packages does not run the linker's
+# nosplit / ABI-wrapper resolution: v0.3.1 shipped a bundle that compiled
+# everywhere and failed to link on both asm targets, and the failure
+# surfaced only in a downstream consumer four releases later. Runs
+# host-direct (needs Go, not the container); cross-compiles, nothing runs.
+link-check-bundle:
+	@test -f "$(WASM2GO_BUNDLE_DIR)/go.mod" \
+		|| { echo "$(WASM2GO_BUNDLE_DIR)/go.mod missing — run 'make wasm' (bundle-gomod) first" >&2; exit 1; }
+	@set -eu; dir=$$(mktemp -d); trap 'rm -rf $$dir' EXIT; \
+	scripts/bundle-link-consumer.sh "$(abspath $(WASM2GO_BUNDLE_DIR))" \
+		"$$(awk '/^module /{print $$2}' $(WASM2GO_BUNDLE_DIR)/go.mod)" "$$dir"
+
 bundle-gomod:
 	@if [ ! -d "$(WASM2GO_BUNDLE_DIR)" ]; then \
 		echo "$(WASM2GO_BUNDLE_DIR) does not exist — run 'make wasm' first" >&2; \
