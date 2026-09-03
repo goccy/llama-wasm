@@ -46,7 +46,7 @@ index fca5119e1..18802d19a 100644
  
  inline static void __wasm_f16x4_store(ggml_fp16_t * p, v128_t x) {
 diff --git a/ggml/src/ggml-cpu/vec.cpp b/ggml/src/ggml-cpu/vec.cpp
-index ff2b636df..802dd6ad0 100644
+index ff2b636df..21a2eee9f 100644
 --- a/ggml/src/ggml-cpu/vec.cpp
 +++ b/ggml/src/ggml-cpu/vec.cpp
 @@ -401,6 +401,10 @@ void ggml_vec_silu_f32(const int n, float * y, const float * x) {
@@ -60,7 +60,21 @@ index ff2b636df..802dd6ad0 100644
  #elif defined(__riscv_v_intrinsic)
      for (int vl; i < n; i += vl) {
          vl = __riscv_vsetvl_e32m2(n - i);
-@@ -438,6 +442,10 @@ void ggml_vec_swiglu_f32(const int n, float * y, const float * x, const float *
+@@ -414,6 +418,13 @@ void ggml_vec_silu_f32(const int n, float * y, const float * x) {
+     }
+ }
+ 
++// On wasm the vector exp kernels are exported under stable debug names,
++// out of line, so a wasm-to-native transpiler can swap the bodies for
++// native kernels (the convention of the q8_0 repack GEMM); exported
++// functions also stay out of line through binaryen's inliner.
++#if defined(__wasm_simd128__)
++__attribute__((noinline, export_name("dbg_vec_swiglu_f32")))
++#endif
+ void ggml_vec_swiglu_f32(const int n, float * y, const float * x, const float * g) {
+     int i = 0;
+ #if defined(__AVX512F__) && defined(__AVX512DQ__)
+@@ -438,6 +449,10 @@ void ggml_vec_swiglu_f32(const int n, float * y, const float * x, const float *
      for (; i + 3 < n; i += 4) {
          vst1q_f32(y + i, vmulq_f32(ggml_v_silu(vld1q_f32(x + i)), vld1q_f32(g + i)));
      }
@@ -71,7 +85,17 @@ index ff2b636df..802dd6ad0 100644
  #elif defined(__riscv_v_intrinsic)
      for (int vl; i < n; i += vl) {
          vl = __riscv_vsetvl_e32m2(n - i);
-@@ -581,6 +589,14 @@ ggml_float ggml_vec_soft_max_f32(const int n, float * y, const float * x, float
+@@ -528,6 +543,9 @@ ggml_float ggml_vec_cvar_f32(const int n, float * y, const float * x, const floa
+     return sum/n;
+ }
+ 
++#if defined(__wasm_simd128__)
++__attribute__((noinline, export_name("dbg_vec_soft_max_f32")))
++#endif
+ ggml_float ggml_vec_soft_max_f32(const int n, float * y, const float * x, float max) {
+     int i = 0;
+     ggml_float sum = 0;
+@@ -581,6 +599,14 @@ ggml_float ggml_vec_soft_max_f32(const int n, float * y, const float * x, float
          vst1q_f32(y + i, val);
          sum += (ggml_float)vaddvq_f32(val);
      }
