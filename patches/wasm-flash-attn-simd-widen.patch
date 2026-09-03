@@ -1,5 +1,5 @@
 diff --git a/ggml/src/ggml-cpu/ops.cpp b/ggml/src/ggml-cpu/ops.cpp
-index 42ec809ce..ea2f9ebba 100644
+index 42ec809ce..d1df2d9b7 100644
 --- a/ggml/src/ggml-cpu/ops.cpp
 +++ b/ggml/src/ggml-cpu/ops.cpp
 @@ -8566,7 +8566,17 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
@@ -116,6 +116,18 @@ index 42ec809ce..ea2f9ebba 100644
                  const char * k_data = (const char *)k->data + (ic + tk)*nbk1 + ik2*nbk2 + ik3*nbk3;
                  if (kv_type == GGML_TYPE_F16) {
                      const ggml_fp16_t * k_f16 = (const ggml_fp16_t *)k_data;
+@@ -8941,7 +9003,10 @@ static void ggml_compute_forward_flash_attn_ext_tiled(
+             for (int tk = 0; tk < kv_tile; tk++) {
+                 const char * v_data = (const char *)v->data + (ic + tk)*nbv1 + iv2*nbv2 + iv3*nbv3;
+                 if (kv_type == GGML_TYPE_F16) {
+-                    ggml_fp16_to_fp32_row((const ggml_fp16_t *)v_data, V32 + tk * DV, DV);
++                    // The CPU backend's converter (SIMD where the ISA
++                    // has one, the transpiler-fusable idiom on wasm);
++                    // ggml_fp16_to_fp32_row is the scalar generic.
++                    ggml_cpu_fp16_to_fp32((const ggml_fp16_t *)v_data, V32 + tk * DV, DV);
+                 } else {
+                     memcpy(V32 + tk * DV, v_data, DV * sizeof(float));
+                 }
 diff --git a/ggml/src/ggml-cpu/simd-gemm.h b/ggml/src/ggml-cpu/simd-gemm.h
 index 2ebd10051..3d5d6a8d4 100644
 --- a/ggml/src/ggml-cpu/simd-gemm.h
