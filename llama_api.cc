@@ -1443,37 +1443,46 @@ std::string llama_ctx_score(uint64_t ctx, const char *text, uint32_t text_len) {
         llama_memory_clear(llama_get_memory(st->ctx), true);
         st->hist.clear();
         st->hist_valid = false;
-        llama_batch batch = llama_batch_init(n, 0, 1);
-        for (int i = 0; i < n; i++) {
-            batch.token[i]     = toks[i];
-            batch.pos[i]       = i;
-            batch.n_seq_id[i]  = 1;
-            batch.seq_id[i][0] = 0;
-            // Logits are needed at every position that PREDICTS a
-            // following token (teacher forcing).
-            batch.logits[i]    = i + 1 < n;
-        }
-        batch.n_tokens = n;
-        const int rc = llama_decode(st->ctx, batch);
-        llama_batch_free(batch);
-        if (rc != 0) return json_err("score: decode failed");
 
+        // Decode in n_batch pieces: llama_decode asserts (and the wasm
+        // module traps) on a batch larger than the context's n_batch, so
+        // a text longer than that must be fed in slices. Each slice's
+        // logits are consumed before the next decode replaces them.
+        const int n_batch = (int) llama_n_batch(st->ctx);
         const int n_vocab = llama_vocab_n_tokens(vocab);
         double nll = 0.0;
-        for (int i = 0; i + 1 < n; i++) {
-            const float *logits = llama_get_logits_ith(st->ctx, i);
-            if (logits == nullptr) return json_err("score: no logits");
-            float maxv = logits[0];
-            for (int v = 1; v < n_vocab; v++) {
-                if (logits[v] > maxv) maxv = logits[v];
+        for (int start = 0; start < n; start += n_batch) {
+            const int cnt = std::min(n_batch, n - start);
+            llama_batch batch = llama_batch_init(cnt, 0, 1);
+            for (int i = 0; i < cnt; i++) {
+                batch.token[i]     = toks[start + i];
+                batch.pos[i]       = start + i;
+                batch.n_seq_id[i]  = 1;
+                batch.seq_id[i][0] = 0;
+                // Logits are needed at every position that PREDICTS a
+                // following token (teacher forcing).
+                batch.logits[i]    = start + i + 1 < n;
             }
-            double sum = 0.0;
-            for (int v = 0; v < n_vocab; v++) {
-                sum += std::exp((double) logits[v] - (double) maxv);
+            batch.n_tokens = cnt;
+            const int rc = llama_decode(st->ctx, batch);
+            llama_batch_free(batch);
+            if (rc != 0) return json_err("score: decode failed");
+
+            for (int i = 0; i < cnt && start + i + 1 < n; i++) {
+                const float *logits = llama_get_logits_ith(st->ctx, i);
+                if (logits == nullptr) return json_err("score: no logits");
+                float maxv = logits[0];
+                for (int v = 1; v < n_vocab; v++) {
+                    if (logits[v] > maxv) maxv = logits[v];
+                }
+                double sum = 0.0;
+                for (int v = 0; v < n_vocab; v++) {
+                    sum += std::exp((double) logits[v] - (double) maxv);
+                }
+                const double logprob =
+                    (double) logits[toks[start + i + 1]] - (double) maxv - std::log(sum);
+                nll -= logprob;
             }
-            const double logprob =
-                (double) logits[toks[i + 1]] - (double) maxv - std::log(sum);
-            nll -= logprob;
         }
         std::string out = "{\"ok\":true";
         out += ",\"n_tokens\":" + json_num(n);
