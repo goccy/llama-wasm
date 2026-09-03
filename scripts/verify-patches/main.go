@@ -37,6 +37,26 @@ var registry = map[string]verification{
 	"wasm-q8-repack-kernels.patch": {
 		reason: "verified by go-llama's gemv repack numeric tests against the released bundle",
 	},
+	// Rounding inside the wasm q8_0 activation quantizers is a numeric
+	// property, not a structural one; go-llama's native-parity and
+	// batch-invariance tests pin it against the released bundle.
+	// The vector expf/silu/soft_max/max paths and the f16 widening
+	// idioms are numeric replacements of scalar loops; go-llama's
+	// native-parity tests pin their output. The dbg_* exports the patch
+	// adds (soft_max, swiglu, the f16 dot and the f16 multiply-add) are
+	// the transpiler's kernel-retarget hooks; go-llama's tests run
+	// through them on every released bundle.
+	"wasm-simd-vec-kernels.patch": {
+		reason: "verified by go-llama's native-parity tests against the released bundle",
+	},
+	// Flash attention widens its K/V/mask tiles through the SIMD f16
+	// loads and accumulates f16 V in f32 on wasm; same verification.
+	"wasm-flash-attn-simd-widen.patch": {
+		reason: "verified by go-llama's native-parity tests against the released bundle",
+	},
+	"wasm-q8-quantize-round-nearest.patch": {
+		reason: "verified by go-llama's native-parity and prompt batch-invariance tests against the released bundle",
+	},
 }
 
 func run() error {

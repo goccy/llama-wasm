@@ -1,7 +1,7 @@
 # Container image shipping every toolchain wasmify needs (wasi-sdk + binaryen +
 # buf + the wasmify CLI itself). Override locally to pin a SHA or to iterate on a
 # wasmify branch — e.g. `make wasm IMAGE=localhost:5001/wasmify:local`.
-IMAGE ?= ghcr.io/goccy/wasmify:v0.6.14
+IMAGE ?= ghcr.io/goccy/wasmify:v0.6.15
 
 # Resource limits for the container that runs the pipeline. A full llama.cpp +
 # ggml wasm build peaks well under MEMORY; CPUS bounds the build's parallelism.
@@ -157,17 +157,15 @@ WASM2GO_TUNING = \
 	WASM2GO_FUSE_LOOP=1 \
 	WASM2GO_FUSE_LOOP_UNROLL=4 \
 	WASM2GO_FAST_MATH=$(WASM2GO_FAST_MATH) \
-	WASM2GO_VEC_DOT_PAIR_ENTRY=$(WASM2GO_VEC_DOT_PAIR_ENTRY) \
-	WASM2GO_VEC_DOT_ROWS=$(WASM2GO_VEC_DOT_ROWS)
+	WASM2GO_ASM_OVERRIDES=$(WASM2GO_ASM_OVERRIDES)
 WASM2GO_ENV ?= $(addprefix -e ,$(WASM2GO_TUNING))
 WASM2GO_FAST_MATH ?= 1
-# The trait-table entry whose self vec_dot pairs rows/columns
-# (wasm2go -vec-dot-pair-entry). 8 is this project's q8_0 type id.
-WASM2GO_VEC_DOT_PAIR_ENTRY ?= 8
-# Batch the verified vec_dot's caller row loops through a row-looped
-# companion (wasm2go -vec-dot-rows). Ignored by wasmify images that
-# predate the option.
-WASM2GO_VEC_DOT_ROWS ?= 1
+# The assembly-override manifest (wasm2go -asm-overrides): the bodies
+# kernels/ generates for the dbg_* exports, wrapped by wasm2go in its
+# override ABI and dispatched on CPU features. Empty transpiles every
+# export from the wasm. Regenerate with `cd kernels && go run
+# ./cmd/genkernels -out asm` after changing a generator.
+WASM2GO_ASM_OVERRIDES ?= kernels/asm/overrides.json
 
 print-wasm2go-env:
 	@for v in $(WASM2GO_TUNING); do echo "export $$v"; done

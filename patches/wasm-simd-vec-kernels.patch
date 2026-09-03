@@ -1,0 +1,267 @@
+diff --git a/ggml/src/ggml-cpu/ggml-cpu.c b/ggml/src/ggml-cpu/ggml-cpu.c
+index 491316f74..f4b5584b5 100644
+--- a/ggml/src/ggml-cpu/ggml-cpu.c
++++ b/ggml/src/ggml-cpu/ggml-cpu.c
+@@ -3490,6 +3490,15 @@ void ggml_cpu_fp16_to_fp32(const ggml_fp16_t * x, float * y, int64_t n) {
+         _mm_storeu_ps(y + i, y_vec);
+     }
+ 
++#elif defined(__wasm_simd128__)
++    // Four table lookups straight into the lanes — the idiom a
++    // wasm-to-native transpiler collapses into one half-to-float widen.
++    for (; i + 3 < n; i += 4) {
++        wasm_v128_store(y + i, wasm_f32x4_make(GGML_CPU_FP16_TO_FP32(x[i + 0]),
++                                               GGML_CPU_FP16_TO_FP32(x[i + 1]),
++                                               GGML_CPU_FP16_TO_FP32(x[i + 2]),
++                                               GGML_CPU_FP16_TO_FP32(x[i + 3])));
++    }
+ #elif defined(__riscv_v_intrinsic) && defined(__riscv_zvfhmin)
+     // calculate step size
+     const int epr = __riscv_vsetvlmax_e16m2();
+diff --git a/ggml/src/ggml-cpu/simd-mappings.h b/ggml/src/ggml-cpu/simd-mappings.h
+index fca5119e1..18802d19a 100644
+--- a/ggml/src/ggml-cpu/simd-mappings.h
++++ b/ggml/src/ggml-cpu/simd-mappings.h
+@@ -836,14 +836,14 @@ static inline unsigned char ggml_endian_byte(int i) {
+ #define GGML_F16_EPR  4
+ 
+ inline static v128_t __wasm_f16x4_load(const ggml_fp16_t * p) {
+-    float tmp[4];
+-
+-    tmp[0] = GGML_CPU_FP16_TO_FP32(p[0]);
+-    tmp[1] = GGML_CPU_FP16_TO_FP32(p[1]);
+-    tmp[2] = GGML_CPU_FP16_TO_FP32(p[2]);
+-    tmp[3] = GGML_CPU_FP16_TO_FP32(p[3]);
+-
+-    return wasm_v128_load(tmp);
++    // Four half-to-float lookups straight into the lanes: the
++    // load/shift/load idiom a wasm-to-native transpiler collapses into
++    // one half-to-float widen. A round trip through a float[4] on the
++    // stack hides the idiom and keeps every lane scalar.
++    return wasm_f32x4_make(GGML_CPU_FP16_TO_FP32(p[0]),
++                           GGML_CPU_FP16_TO_FP32(p[1]),
++                           GGML_CPU_FP16_TO_FP32(p[2]),
++                           GGML_CPU_FP16_TO_FP32(p[3]));
+ }
+ 
+ inline static void __wasm_f16x4_store(ggml_fp16_t * p, v128_t x) {
+diff --git a/ggml/src/ggml-cpu/vec.cpp b/ggml/src/ggml-cpu/vec.cpp
+index ff2b636df..e288ee22d 100644
+--- a/ggml/src/ggml-cpu/vec.cpp
++++ b/ggml/src/ggml-cpu/vec.cpp
+@@ -261,6 +261,12 @@ void ggml_vec_dot_bf16(int n, float * GGML_RESTRICT s, size_t bs, ggml_bf16_t *
+     *s = sumf;
+ }
+ 
++#if defined(__wasm_simd128__)
++// Exported so the wasm2go transpiler can swap in a native kernel: this is
++// the K.Q dot of the single-query flash-attention path, once per KV
++// position, and the wasm build widens every f16 through a table lookup.
++__attribute__((export_name("dbg_vec_dot_f16")))
++#endif
+ void ggml_vec_dot_f16(int n, float * GGML_RESTRICT s, size_t bs, ggml_fp16_t * GGML_RESTRICT x, size_t bx, ggml_fp16_t * GGML_RESTRICT y, size_t by, int nrc) {
+     assert(nrc == 1);
+     GGML_UNUSED(nrc);
+@@ -401,6 +407,10 @@ void ggml_vec_silu_f32(const int n, float * y, const float * x) {
+     for (; i + 3 < n; i += 4) {
+         vst1q_f32(y + i, ggml_v_silu(vld1q_f32(x + i)));
+     }
++#elif defined(__wasm_simd128__)
++    for (; i + 3 < n; i += 4) {
++        wasm_v128_store(y + i, ggml_v_silu(wasm_v128_load(x + i)));
++    }
+ #elif defined(__riscv_v_intrinsic)
+     for (int vl; i < n; i += vl) {
+         vl = __riscv_vsetvl_e32m2(n - i);
+@@ -414,6 +424,13 @@ void ggml_vec_silu_f32(const int n, float * y, const float * x) {
+     }
+ }
+ 
++// On wasm the vector exp kernels are exported under stable debug names,
++// out of line, so a wasm-to-native transpiler can swap the bodies for
++// native kernels (the convention of the q8_0 repack GEMM); exported
++// functions also stay out of line through binaryen's inliner.
++#if defined(__wasm_simd128__)
++__attribute__((noinline, export_name("dbg_vec_swiglu_f32")))
++#endif
+ void ggml_vec_swiglu_f32(const int n, float * y, const float * x, const float * g) {
+     int i = 0;
+ #if defined(__AVX512F__) && defined(__AVX512DQ__)
+@@ -438,6 +455,10 @@ void ggml_vec_swiglu_f32(const int n, float * y, const float * x, const float *
+     for (; i + 3 < n; i += 4) {
+         vst1q_f32(y + i, vmulq_f32(ggml_v_silu(vld1q_f32(x + i)), vld1q_f32(g + i)));
+     }
++#elif defined(__wasm_simd128__)
++    for (; i + 3 < n; i += 4) {
++        wasm_v128_store(y + i, wasm_f32x4_mul(ggml_v_silu(wasm_v128_load(x + i)), wasm_v128_load(g + i)));
++    }
+ #elif defined(__riscv_v_intrinsic)
+     for (int vl; i < n; i += vl) {
+         vl = __riscv_vsetvl_e32m2(n - i);
+@@ -528,6 +549,9 @@ ggml_float ggml_vec_cvar_f32(const int n, float * y, const float * x, const floa
+     return sum/n;
+ }
+ 
++#if defined(__wasm_simd128__)
++__attribute__((noinline, export_name("dbg_vec_soft_max_f32")))
++#endif
+ ggml_float ggml_vec_soft_max_f32(const int n, float * y, const float * x, float max) {
+     int i = 0;
+     ggml_float sum = 0;
+@@ -581,6 +605,14 @@ ggml_float ggml_vec_soft_max_f32(const int n, float * y, const float * x, float
+         vst1q_f32(y + i, val);
+         sum += (ggml_float)vaddvq_f32(val);
+     }
++#elif defined(__wasm_simd128__)
++    for (; i + 3 < n; i += 4) {
++        v128_t val = ggml_v_expf(wasm_f32x4_sub(wasm_v128_load(x + i),
++                                                wasm_f32x4_splat(max)));
++        wasm_v128_store(y + i, val);
++        sum += (ggml_float)(wasm_f32x4_extract_lane(val, 0) + wasm_f32x4_extract_lane(val, 1) +
++                            wasm_f32x4_extract_lane(val, 2) + wasm_f32x4_extract_lane(val, 3));
++    }
+ #elif defined(__riscv_v_intrinsic)
+     vfloat64m1_t vsum = __riscv_vfmv_v_f_f64m1(0, 1);
+     for (int avl; i < n; i += avl) {
+@@ -611,3 +643,13 @@ ggml_float ggml_vec_log_soft_max_f32(const int n, float * y, const float * x, fl
+     }
+     return sum = (ggml_float)logf(sum);
+ }
++
++#if defined(__wasm_simd128__)
++// The V accumulate of the single-query flash-attention path on wasm,
++// kept out of line and exported so the wasm2go transpiler can swap in a
++// native kernel (see ggml_vec_mad_f16_f32 in vec.h).
++__attribute__((noinline, export_name("dbg_vec_mad_f16_f32")))
++void ggml_vec_mad_f16_f32_row(const int n, float * GGML_RESTRICT y, const ggml_fp16_t * GGML_RESTRICT x, const float v) {
++    ggml_vec_mad_f16_f32(n, y, x, v);
++}
++#endif
+diff --git a/ggml/src/ggml-cpu/vec.h b/ggml/src/ggml-cpu/vec.h
+index 5de9cb5b7..0ff39cc60 100644
+--- a/ggml/src/ggml-cpu/vec.h
++++ b/ggml/src/ggml-cpu/vec.h
+@@ -436,6 +436,40 @@ inline static void ggml_vec_mad_f32(const int n, float * GGML_RESTRICT y, const
+ #endif
+ }
+ 
++#if defined(__wasm_simd128__)
++// y[i] += x[i]*v with f16 x and f32 y: the f32-accumulating twin of
++// ggml_vec_mad_f16 for a target without f16 arithmetic, where every
++// f16 accumulator update would otherwise round-trip through scalar
++// conversions. The f16 operand widens through the SIMD f16 loads.
++inline static void ggml_vec_mad_f16_f32(const int n, float * GGML_RESTRICT y, const ggml_fp16_t * GGML_RESTRICT x, const float v) {
++    const int np = (n & ~(GGML_F16_STEP - 1));
++
++    GGML_F32_VEC vx = GGML_F32_VEC_SET1(v);
++
++    GGML_F16_VEC ax[GGML_F16_ARR];
++    GGML_F32_VEC ay[GGML_F16_ARR];
++
++    for (int i = 0; i < np; i += GGML_F16_STEP) {
++        for (int j = 0; j < GGML_F16_ARR; j++) {
++            ax[j] = GGML_F16_VEC_LOAD(x + i + j*GGML_F16_EPR, j);
++            ay[j] = GGML_F32_VEC_LOAD(y + i + j*GGML_F16_EPR);
++            ay[j] = GGML_F32_VEC_FMA(ay[j], ax[j], vx);
++
++            GGML_F32_VEC_STORE(y + i + j*GGML_F16_EPR, ay[j]);
++        }
++    }
++
++    // leftovers
++    for (int i = np; i < n; ++i) {
++        y[i] += GGML_CPU_FP16_TO_FP32(x[i])*v;
++    }
++}
++
++// Out-of-line, exported form of ggml_vec_mad_f16_f32 (vec.cpp) for the
++// flash-attention V accumulate.
++void ggml_vec_mad_f16_f32_row(const int n, float * GGML_RESTRICT y, const ggml_fp16_t * GGML_RESTRICT x, const float v);
++#endif
++
+ inline static void ggml_vec_mad_f16(const int n, ggml_fp16_t * GGML_RESTRICT y, const ggml_fp16_t * GGML_RESTRICT x, const float v) {
+ #if defined(GGML_SIMD) && defined(__ARM_FEATURE_SVE)
+     const int sve_register_length = svcntb() * 8;
+@@ -1315,6 +1349,57 @@ inline static __m128 ggml_v_silu(__m128 x) {
+     return _mm_div_ps(x, one_plus_exp_neg_x);
+ }
+ 
++#elif defined(__wasm_simd128__)
++
++// wasm SIMD128 port of the SSE2 kernel above (no FMA in the baseline
++// SIMD proposal, so the multiply-adds round twice, exactly as the SSE2
++// build without FMA does). Same range handling: numbers above 88.38
++// flush to infinity, beneath -103.97 to zero.
++inline static v128_t ggml_v_expf(v128_t x) {
++    const v128_t r = wasm_f32x4_splat(0x1.8p23f);
++    const v128_t z = wasm_f32x4_add(wasm_f32x4_mul(x, wasm_f32x4_splat(0x1.715476p+0f)), r);
++    const v128_t n = wasm_f32x4_sub(z, r);
++    const v128_t b = wasm_f32x4_sub(wasm_f32x4_sub(x, wasm_f32x4_mul(n, wasm_f32x4_splat(0x1.62e4p-1f))),
++                                    wasm_f32x4_mul(n, wasm_f32x4_splat(0x1.7f7d1cp-20f)));
++    const v128_t e = wasm_i32x4_shl(z, 23);
++    const v128_t k = wasm_i32x4_add(e, wasm_f32x4_splat(1.0f));
++    const v128_t c = wasm_f32x4_gt(wasm_f32x4_abs(n), wasm_f32x4_splat(126.0f));
++    const v128_t u = wasm_f32x4_mul(b, b);
++    const v128_t j = wasm_f32x4_add(
++        wasm_f32x4_mul(
++            wasm_f32x4_add(
++                wasm_f32x4_mul(wasm_f32x4_add(wasm_f32x4_mul(wasm_f32x4_splat(0x1.0e4020p-7f), b),
++                                              wasm_f32x4_splat(0x1.573e2ep-5f)),
++                               u),
++                wasm_f32x4_add(wasm_f32x4_mul(wasm_f32x4_splat(0x1.555e66p-3f), b),
++                               wasm_f32x4_splat(0x1.fffdb6p-2f))),
++            u),
++        wasm_f32x4_mul(wasm_f32x4_splat(0x1.ffffecp-1f), b));
++    if (!wasm_v128_any_true(c)) {
++        return wasm_f32x4_add(wasm_f32x4_mul(j, k), k);
++    }
++    const v128_t g  = wasm_v128_and(wasm_f32x4_le(n, wasm_f32x4_splat(0.0f)), wasm_i32x4_splat((int32_t) 0x82000000u));
++    const v128_t s1 = wasm_i32x4_add(g, wasm_i32x4_splat((int32_t) 0x7f000000u));
++    const v128_t s2 = wasm_i32x4_sub(e, g);
++    const v128_t d  = wasm_f32x4_gt(wasm_f32x4_abs(n), wasm_f32x4_splat(192.0f));
++    return wasm_v128_bitselect(
++        wasm_f32x4_mul(s1, s1),
++        wasm_v128_bitselect(wasm_f32x4_mul(wasm_f32x4_add(wasm_f32x4_mul(s2, j), s2), s1),
++                            wasm_f32x4_add(wasm_f32x4_mul(k, j), k),
++                            c),
++        d);
++}
++
++// computes silu x/(1+exp(-x)) in single precision vector
++inline static v128_t ggml_v_silu(v128_t x) {
++    const v128_t one = wasm_f32x4_splat(1.0f);
++    const v128_t zero = wasm_f32x4_splat(0.0f);
++    const v128_t neg_x = wasm_f32x4_sub(zero, x);
++    const v128_t exp_neg_x = ggml_v_expf(neg_x);
++    const v128_t one_plus_exp_neg_x = wasm_f32x4_add(one, exp_neg_x);
++    return wasm_f32x4_div(x, one_plus_exp_neg_x);
++}
++
+ #elif defined(__riscv_v_intrinsic)
+ 
+ // adapted from arm limited optimized routine
+@@ -1539,7 +1624,23 @@ inline static void ggml_vec_sum_bf16_ggf(const int n, float * s, const ggml_bf16
+ }
+ 
+ inline static void ggml_vec_max_f32(const int n, float * s, const float * x) {
+-#ifndef GGML_USE_ACCELERATE
++#if defined(__wasm_simd128__)
++    float max = -INFINITY;
++    int i = 0;
++    if (n >= 4) {
++        // pmax(x, m) = (m > x) ? m : x, the scalar MAX(m, x) lane-wise.
++        v128_t vmax = wasm_f32x4_splat(-INFINITY);
++        for (; i + 3 < n; i += 4) {
++            vmax = wasm_f32x4_pmax(wasm_v128_load(x + i), vmax);
++        }
++        max = MAX(MAX(wasm_f32x4_extract_lane(vmax, 0), wasm_f32x4_extract_lane(vmax, 1)),
++                  MAX(wasm_f32x4_extract_lane(vmax, 2), wasm_f32x4_extract_lane(vmax, 3)));
++    }
++    for (; i < n; ++i) {
++        max = MAX(max, x[i]);
++    }
++    *s = max;
++#elif !defined(GGML_USE_ACCELERATE)
+     float max = -INFINITY;
+     for (int i = 0; i < n; ++i) {
+         max = MAX(max, x[i]);
