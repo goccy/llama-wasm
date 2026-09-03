@@ -1,0 +1,141 @@
+diff --git a/ggml/src/ggml-cpu/ops.cpp b/ggml/src/ggml-cpu/ops.cpp
+index 42ec809ce..ea2f9ebba 100644
+--- a/ggml/src/ggml-cpu/ops.cpp
++++ b/ggml/src/ggml-cpu/ops.cpp
+@@ -8566,7 +8566,17 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
+         ggml_fp16_t * VKQ16 = (ggml_fp16_t *) (VKQ32 + 1*DV); // (temporary) FP16 VKQ accumulator
+         ggml_fp16_t * Q_q   = (ggml_fp16_t *) (VKQ32 + 2*DV); // (temporary) buffer for Q converted to quantized/FP16
+ 
+-        if (v->type == GGML_TYPE_F16) {
++        // f16 V normally accumulates in f16 (native f16 FMA). wasm SIMD
++        // has no f16 arithmetic, so every VKQ16 update would round-trip
++        // through scalar conversions: accumulate in f32 there and widen
++        // V through the SIMD f16 loads instead.
++#if defined(__wasm_simd128__)
++        const bool v_acc_f16 = false;
++#else
++        const bool v_acc_f16 = v->type == GGML_TYPE_F16;
++#endif
++
++        if (v_acc_f16) {
+             memset(VKQ16, 0, DV*sizeof(ggml_fp16_t));
+         } else {
+             memset(VKQ32, 0, DV*sizeof(float));
+@@ -8615,7 +8625,7 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
+ 
+             const char * v_data = ((const char *) v->data + (ic*nbv1 + iv2*nbv2 + iv3*nbv3));
+ 
+-            if (v->type == GGML_TYPE_F16) {
++            if (v_acc_f16) {
+                 if (s > M) {
+                     // s is new maximum, ms < 1.0f, vs == expf(s - s) == 1.0f
+                     M = s;
+@@ -8644,6 +8654,11 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
+                 }
+ 
+                 // V += v*expf(s - M)
++#if defined(__wasm_simd128__)
++                if (v->type == GGML_TYPE_F16) {
++                    ggml_vec_mad_f16_f32(DV, VKQ32, (const ggml_fp16_t *) v_data, vs);
++                } else
++#endif
+                 if (v_to_float) {
+                     v_to_float(v_data, V32, DV);
+                     ggml_vec_mad_f32(DV, VKQ32, V32, vs);
+@@ -8656,7 +8671,7 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
+             S = S*ms + vs; // scale and increment sum with partial sum
+         }
+ 
+-        if (v->type == GGML_TYPE_F16) {
++        if (v_acc_f16) {
+             for (int64_t d = 0; d < DV; ++d) {
+                 VKQ32[d] = GGML_CPU_FP16_TO_FP32(VKQ16[d]);
+             }
+@@ -8854,7 +8869,23 @@ static void ggml_compute_forward_flash_attn_ext_tiled(
+                 bool can_skip = true;
+                 for (int tq = 0; tq < tile_rows; tq++) {
+                     const ggml_fp16_t * mp_row = (const ggml_fp16_t *)((const char *) mask->data + (iq1 + tq)*mask->nb[1] + (iq2%mask->ne[2])*mask->nb[2] + (iq3%mask->ne[3])*mask->nb[3]);
+-                    for (int tk = 0; tk < kv_tile; tk++) {
++                    int tk = 0;
++#if defined(__wasm_simd128__)
++                    {
++                        // Widen the f16 mask four at a time (same products
++                        // as the scalar loop; slope * -inf stays -inf).
++                        const v128_t vslope = wasm_f32x4_splat(slope);
++                        const v128_t ninf   = wasm_f32x4_splat(-INFINITY);
++                        for (; tk + 3 < kv_tile; tk += 4) {
++                            const v128_t mv = wasm_f32x4_mul(vslope, __wasm_f16x4_load(mp_row + ic + tk));
++                            wasm_v128_store(mask32 + tq * KV_TILE_SZ + tk, mv);
++                            if (!wasm_i32x4_all_true(wasm_f32x4_eq(mv, ninf))) {
++                                can_skip = false;
++                            }
++                        }
++                    }
++#endif
++                    for (; tk < kv_tile; tk++) {
+                         mask32[tq * KV_TILE_SZ + tk] = slope * GGML_CPU_FP16_TO_FP32(mp_row[ic + tk]);
+                         if (mask32[tq * KV_TILE_SZ + tk] != -INFINITY) {
+                             can_skip = false;
+@@ -8873,7 +8904,38 @@ static void ggml_compute_forward_flash_attn_ext_tiled(
+ 
+             // Pack K tile transposed: K_f32[dk][kv] so KV_TILE is contiguous (SIMD dim)
+             // Zero-pad the last tile so the GEMM always operates on KV_TILE_SZ columns
+-            for (int tk = 0; tk < kv_tile; tk++) {
++            int tk0 = 0;
++#if defined(__wasm_simd128__)
++            if (kv_type == GGML_TYPE_F16 && DK % 4 == 0) {
++                // Four kv rows per step: widen each row's f16 quad through
++                // the SIMD f16 loads and transpose 4x4 in registers, so the
++                // dk-major K_f32 fills with vector stores instead of one
++                // table lookup and one strided scalar store per element.
++                for (; tk0 + 3 < kv_tile; tk0 += 4) {
++                    const char * kb = (const char *)k->data + (ic + tk0)*nbk1 + ik2*nbk2 + ik3*nbk3;
++                    const ggml_fp16_t * k0 = (const ggml_fp16_t *)(kb);
++                    const ggml_fp16_t * k1 = (const ggml_fp16_t *)(kb + nbk1);
++                    const ggml_fp16_t * k2 = (const ggml_fp16_t *)(kb + 2*nbk1);
++                    const ggml_fp16_t * k3 = (const ggml_fp16_t *)(kb + 3*nbk1);
++                    float * kd = K_f32 + tk0;
++                    for (int64_t dk = 0; dk < DK; dk += 4) {
++                        const v128_t r0 = __wasm_f16x4_load(k0 + dk);
++                        const v128_t r1 = __wasm_f16x4_load(k1 + dk);
++                        const v128_t r2 = __wasm_f16x4_load(k2 + dk);
++                        const v128_t r3 = __wasm_f16x4_load(k3 + dk);
++                        const v128_t t0 = wasm_i32x4_shuffle(r0, r1, 0, 4, 1, 5);
++                        const v128_t t1 = wasm_i32x4_shuffle(r2, r3, 0, 4, 1, 5);
++                        const v128_t t2 = wasm_i32x4_shuffle(r0, r1, 2, 6, 3, 7);
++                        const v128_t t3 = wasm_i32x4_shuffle(r2, r3, 2, 6, 3, 7);
++                        wasm_v128_store(kd + (dk + 0)*KV_TILE_SZ, wasm_i64x2_shuffle(t0, t1, 0, 2));
++                        wasm_v128_store(kd + (dk + 1)*KV_TILE_SZ, wasm_i64x2_shuffle(t0, t1, 1, 3));
++                        wasm_v128_store(kd + (dk + 2)*KV_TILE_SZ, wasm_i64x2_shuffle(t2, t3, 0, 2));
++                        wasm_v128_store(kd + (dk + 3)*KV_TILE_SZ, wasm_i64x2_shuffle(t2, t3, 1, 3));
++                    }
++                }
++            }
++#endif
++            for (int tk = tk0; tk < kv_tile; tk++) {
+                 const char * k_data = (const char *)k->data + (ic + tk)*nbk1 + ik2*nbk2 + ik3*nbk3;
+                 if (kv_type == GGML_TYPE_F16) {
+                     const ggml_fp16_t * k_f16 = (const ggml_fp16_t *)k_data;
+diff --git a/ggml/src/ggml-cpu/simd-gemm.h b/ggml/src/ggml-cpu/simd-gemm.h
+index 2ebd10051..3d5d6a8d4 100644
+--- a/ggml/src/ggml-cpu/simd-gemm.h
++++ b/ggml/src/ggml-cpu/simd-gemm.h
+@@ -57,7 +57,17 @@ static inline void simd_gemm_ukernel(
+ }
+ 
+ // C[M x N] += A[M x K] * B[K x N]
+-static void simd_gemm(
++#if defined(__wasm_simd128__)
++// On wasm the GEMM is exported under a stable debug name, out of line,
++// so a wasm-to-native transpiler can swap the whole body for a native
++// f32 tile kernel (the same convention as the q8_0 repack kernels).
++// The per-element arithmetic is a sequential k-ordered multiply-then-
++// add, which the native kernels reproduce exactly.
++__attribute__((noinline, export_name("dbg_simd_gemm_f32")))
++#else
++static
++#endif
++void simd_gemm(
+     float       * GGML_RESTRICT C,
+     const float * GGML_RESTRICT A,
+     const float * GGML_RESTRICT B,

@@ -11,10 +11,18 @@ index 836bae4d0..b56e80cab 100644
          message(WARNING "Unknown CPU architecture. Falling back to generic implementations.")
          list(APPEND ARCH_FLAGS -DGGML_CPU_GENERIC)
 diff --git a/ggml/src/ggml-cpu/arch-fallback.h b/ggml/src/ggml-cpu/arch-fallback.h
-index 152e0bac9..cc581dcc1 100644
+index 152e0bac9..9babc733e 100644
 --- a/ggml/src/ggml-cpu/arch-fallback.h
 +++ b/ggml/src/ggml-cpu/arch-fallback.h
-@@ -332,7 +332,6 @@
+@@ -314,7 +314,6 @@
+ #define ggml_vec_dot_q1_0_q8_0_generic ggml_vec_dot_q1_0_q8_0
+ #define ggml_vec_dot_q2_0_q8_0_generic ggml_vec_dot_q2_0_q8_0
+ // repack.cpp
+-#define ggml_quantize_mat_q8_0_4x4_generic ggml_quantize_mat_q8_0_4x4
+ #define ggml_quantize_mat_q8_0_4x8_generic ggml_quantize_mat_q8_0_4x8
+ #define ggml_quantize_mat_q8_K_4x4_generic ggml_quantize_mat_q8_K_4x4
+ #define ggml_quantize_mat_q8_K_4x8_generic ggml_quantize_mat_q8_K_4x8
+@@ -332,7 +331,6 @@
  #define ggml_gemv_iq4_nl_8x8_q8_0_generic ggml_gemv_iq4_nl_8x8_q8_0
  #define ggml_gemv_mxfp4_4x4_q8_0_generic ggml_gemv_mxfp4_4x4_q8_0
  #define ggml_gemv_mxfp4_8x8_q8_0_generic ggml_gemv_mxfp4_8x8_q8_0
@@ -22,7 +30,7 @@ index 152e0bac9..cc581dcc1 100644
  #define ggml_gemv_q8_0_4x8_q8_0_generic ggml_gemv_q8_0_4x8_q8_0
  #define ggml_gemm_q4_0_4x4_q8_0_generic ggml_gemm_q4_0_4x4_q8_0
  #define ggml_gemm_q4_0_4x8_q8_0_generic ggml_gemm_q4_0_4x8_q8_0
-@@ -348,6 +347,5 @@
+@@ -348,6 +346,5 @@
  #define ggml_gemm_iq4_nl_8x8_q8_0_generic ggml_gemm_iq4_nl_8x8_q8_0
  #define ggml_gemm_mxfp4_4x4_q8_0_generic ggml_gemm_mxfp4_4x4_q8_0
  #define ggml_gemm_mxfp4_8x8_q8_0_generic ggml_gemm_mxfp4_8x8_q8_0
@@ -31,10 +39,10 @@ index 152e0bac9..cc581dcc1 100644
  #endif
 diff --git a/ggml/src/ggml-cpu/arch/wasm/repack.cpp b/ggml/src/ggml-cpu/arch/wasm/repack.cpp
 new file mode 100644
-index 000000000..4b062cc10
+index 000000000..9db77fe9d
 --- /dev/null
 +++ b/ggml/src/ggml-cpu/arch/wasm/repack.cpp
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,233 @@
 +#define GGML_COMMON_IMPL_CPP
 +#define GGML_COMMON_DECL_CPP
 +#include "ggml-common.h"
@@ -85,6 +93,74 @@ index 000000000..4b062cc10
 +    return wasm_f32x4_mul(repack_f16x4(d), wasm_f32x4_splat(da));
 +}
 +#endif // __wasm_simd128__
++
++// Activation-side quantization for the q8_0x4 repack GEMM: four rows
++// of k floats become interleaved block_q8_0x4 blocks. The generic
++// version rounds each element through scalar roundf; this SIMD form
++// mirrors the NEON kernel — per-row 32-float abs/max reduction, one
++// f32x4 multiply per 4 elements, round-to-nearest-even (f32x4.nearest,
++// the rounding every native SIMD quantizer uses), and the 4-row group
++// interleave falls out of two narrowing packs: i32x4 -> i16x8 for row
++// pairs, then i16x8 -> i8x16 gives [row0 4B][row1 4B][row2 4B][row3
++// 4B] — exactly the 16-byte group layout — for ONE store per group.
++__attribute__((noinline))
++void ggml_quantize_mat_q8_0_4x4(const float * GGML_RESTRICT x, void * GGML_RESTRICT vy, int64_t k) {
++    assert(QK8_0 == 32);
++    assert(k % QK8_0 == 0);
++    const int nb = k / QK8_0;
++
++    block_q8_0x4 * GGML_RESTRICT y = (block_q8_0x4 *) vy;
++
++#if defined(__wasm_simd128__)
++    v128_t srcv[4][8];
++    float  id[4];
++
++    for (int i = 0; i < nb; i++) {
++        for (int row_iter = 0; row_iter < 4; row_iter++) {
++            const float * GGML_RESTRICT xr = x + row_iter * k + i * QK8_0;
++            for (int j = 0; j < 8; j++) srcv[row_iter][j] = wasm_v128_load(xr + 4 * j);
++
++            v128_t amaxv[4];
++            for (int j = 0; j < 4; j++) {
++                amaxv[j] = wasm_f32x4_max(wasm_f32x4_abs(srcv[row_iter][2 * j]),
++                                          wasm_f32x4_abs(srcv[row_iter][2 * j + 1]));
++            }
++            amaxv[0] = wasm_f32x4_max(amaxv[0], amaxv[1]);
++            amaxv[2] = wasm_f32x4_max(amaxv[2], amaxv[3]);
++            amaxv[0] = wasm_f32x4_max(amaxv[0], amaxv[2]);
++
++            const float amax = MAX(MAX(wasm_f32x4_extract_lane(amaxv[0], 0),
++                                       wasm_f32x4_extract_lane(amaxv[0], 1)),
++                                   MAX(wasm_f32x4_extract_lane(amaxv[0], 2),
++                                       wasm_f32x4_extract_lane(amaxv[0], 3)));
++
++            const float d = amax / ((1 << 7) - 1);
++            id[row_iter] = d ? 1.0f / d : 0.0f;
++
++            y[i].d[row_iter] = GGML_CPU_FP32_TO_FP16(d);
++        }
++
++        const v128_t id0 = wasm_f32x4_splat(id[0]);
++        const v128_t id1 = wasm_f32x4_splat(id[1]);
++        const v128_t id2 = wasm_f32x4_splat(id[2]);
++        const v128_t id3 = wasm_f32x4_splat(id[3]);
++        for (int j = 0; j < 8; j++) {
++            const v128_t v0 = wasm_i32x4_trunc_sat_f32x4(wasm_f32x4_nearest(wasm_f32x4_mul(srcv[0][j], id0)));
++            const v128_t v1 = wasm_i32x4_trunc_sat_f32x4(wasm_f32x4_nearest(wasm_f32x4_mul(srcv[1][j], id1)));
++            const v128_t v2 = wasm_i32x4_trunc_sat_f32x4(wasm_f32x4_nearest(wasm_f32x4_mul(srcv[2][j], id2)));
++            const v128_t v3 = wasm_i32x4_trunc_sat_f32x4(wasm_f32x4_nearest(wasm_f32x4_mul(srcv[3][j], id3)));
++            // |q| <= 127, so the saturating packs are exact.
++            const v128_t p01 = wasm_i16x8_narrow_i32x4(v0, v1);
++            const v128_t p23 = wasm_i16x8_narrow_i32x4(v2, v3);
++            wasm_v128_store(y[i].qs + 16 * j, wasm_i8x16_narrow_i16x8(p01, p23));
++        }
++    }
++#else
++    UNUSED(nb);
++    UNUSED(y);
++    ggml_quantize_mat_q8_0_4x4_generic(x, vy, k);
++#endif
++}
 +
 +// noinline: inlined into the mul_mat driver these bodies land in a
 +// huge function where the transpiler's loop fusion cannot claim the
