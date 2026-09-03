@@ -42,7 +42,10 @@ var registry = map[string]verification{
 	// batch-invariance tests pin it against the released bundle.
 	// The vector expf/silu/soft_max/max paths and the f16 widening
 	// idioms are numeric replacements of scalar loops; go-llama's
-	// native-parity tests pin their output.
+	// native-parity tests pin their output. The dbg_* exports the patch
+	// adds (soft_max, swiglu, the f16 dot and the f16 multiply-add) are
+	// the transpiler's kernel-retarget hooks; go-llama's tests run
+	// through them on every released bundle.
 	"wasm-simd-vec-kernels.patch": {
 		reason: "verified by go-llama's native-parity tests against the released bundle",
 	},

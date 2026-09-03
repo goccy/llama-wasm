@@ -1,5 +1,5 @@
 diff --git a/ggml/src/ggml-cpu/ops.cpp b/ggml/src/ggml-cpu/ops.cpp
-index 42ec809ce..d1df2d9b7 100644
+index 42ec809ce..8056143fd 100644
 --- a/ggml/src/ggml-cpu/ops.cpp
 +++ b/ggml/src/ggml-cpu/ops.cpp
 @@ -8566,7 +8566,17 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
@@ -36,7 +36,7 @@ index 42ec809ce..d1df2d9b7 100644
                  // V += v*expf(s - M)
 +#if defined(__wasm_simd128__)
 +                if (v->type == GGML_TYPE_F16) {
-+                    ggml_vec_mad_f16_f32(DV, VKQ32, (const ggml_fp16_t *) v_data, vs);
++                    ggml_vec_mad_f16_f32_row(DV, VKQ32, (const ggml_fp16_t *) v_data, vs);
 +                } else
 +#endif
                  if (v_to_float) {
