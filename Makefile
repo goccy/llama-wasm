@@ -157,17 +157,15 @@ WASM2GO_TUNING = \
 	WASM2GO_FUSE_LOOP=1 \
 	WASM2GO_FUSE_LOOP_UNROLL=4 \
 	WASM2GO_FAST_MATH=$(WASM2GO_FAST_MATH) \
-	WASM2GO_VEC_DOT_PAIR_ENTRY=$(WASM2GO_VEC_DOT_PAIR_ENTRY) \
-	WASM2GO_VEC_DOT_ROWS=$(WASM2GO_VEC_DOT_ROWS)
+	WASM2GO_KERNEL_OVERRIDES=$(WASM2GO_KERNEL_OVERRIDES)
 WASM2GO_ENV ?= $(addprefix -e ,$(WASM2GO_TUNING))
 WASM2GO_FAST_MATH ?= 1
-# The trait-table entry whose self vec_dot pairs rows/columns
-# (wasm2go -vec-dot-pair-entry). 8 is this project's q8_0 type id.
-WASM2GO_VEC_DOT_PAIR_ENTRY ?= 8
-# Batch the verified vec_dot's caller row loops through a row-looped
-# companion (wasm2go -vec-dot-rows). Ignored by wasmify images that
-# predate the option.
-WASM2GO_VEC_DOT_ROWS ?= 1
+# The kernel-override manifest (wasm2go -kernel-overrides): the
+# assembly bodies kernels/ generates for the dbg_* exports, wrapped by
+# wasm2go in its override ABI and dispatched on CPU features. Empty
+# transpiles every export from the wasm. `make kernels` regenerates the
+# bodies from kernels/internal/asm.
+WASM2GO_KERNEL_OVERRIDES ?= kernels/asm/kernels.json
 
 print-wasm2go-env:
 	@for v in $(WASM2GO_TUNING); do echo "export $$v"; done

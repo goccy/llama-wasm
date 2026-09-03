@@ -1,0 +1,204 @@
+{
+  "version": 1,
+  "memory64": true,
+  "kernels": [
+    {
+      "export": "dbg_gemm_q8_0_4x4",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "i8mm",
+          "frame": 65600,
+          "file": "dbg_gemm_q8_0_4x4_arm64_i8mm.s"
+        },
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 65600,
+          "file": "dbg_gemm_q8_0_4x4_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx512vnni",
+          "frame": 65600,
+          "file": "dbg_gemm_q8_0_4x4_amd64_avx512vnni.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 65600,
+          "file": "dbg_gemm_q8_0_4x4_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_gemv_q8_0_4x4",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_gemv_q8_0_4x4_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx512vnni",
+          "frame": 73792,
+          "file": "dbg_gemv_q8_0_4x4_amd64_avx512vnni.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 73792,
+          "file": "dbg_gemv_q8_0_4x4_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_simd_gemm_f32",
+      "params": [
+        "i64",
+        "i64",
+        "i64",
+        "i32",
+        "i32",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "neon",
+          "frame": 16,
+          "file": "dbg_simd_gemm_f32_arm64_neon.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_simd_gemm_f32_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_soft_max_f32",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "f32"
+      ],
+      "result": "f64",
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "neon",
+          "frame": 16,
+          "file": "dbg_vec_soft_max_f32_arm64_neon.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_soft_max_f32_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_swiglu_f32",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "neon",
+          "frame": 16,
+          "file": "dbg_vec_swiglu_f32_arm64_neon.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_swiglu_f32_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_f16",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "neon",
+          "frame": 16,
+          "file": "dbg_vec_dot_f16_arm64_neon.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_f16_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_mad_f16_f32",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "f32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "neon",
+          "frame": 16,
+          "file": "dbg_vec_mad_f16_f32_arm64_neon.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_mad_f16_f32_amd64_avx2.s"
+        }
+      ]
+    }
+  ]
+}
