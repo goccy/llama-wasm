@@ -289,6 +289,6 @@ func a64SimdGemmF32Kernel(sym string, wide bool) string {
 	w("sgdone:")
 	w("\tRET")
 	w("sgoob:")
-	w("\tB\tkov_oob")
+	w("\tB\tovr_oob")
 	return b.String()
 }

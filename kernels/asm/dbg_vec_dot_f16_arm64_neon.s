@@ -79,4 +79,4 @@ vdreduce:
 	FMOVS	F0, (R2)
 	RET
 vdoob:
-	B	kov_oob
+	B	ovr_oob

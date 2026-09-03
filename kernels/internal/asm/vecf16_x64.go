@@ -96,7 +96,7 @@ func x64VecDotF16Kernel(sym string, _ *ConstPool, wide bool) string {
 	w("\tRET")
 	w("vdoob:")
 	w("\tVZEROUPPER")
-	w("\tJMP\tkov_oob")
+	w("\tJMP\tovr_oob")
 	return sb.String()
 }
 
@@ -172,6 +172,6 @@ func x64VecMadF16F32Kernel(sym string, _ *ConstPool, wide bool) string {
 	w("\tRET")
 	w("vmoob:")
 	w("\tVZEROUPPER")
-	w("\tJMP\tkov_oob")
+	w("\tJMP\tovr_oob")
 	return sb.String()
 }

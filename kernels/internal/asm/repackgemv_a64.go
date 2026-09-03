@@ -213,6 +213,6 @@ func a64RepackGemvKernel(sym string, wide bool) string {
 	w("gvdone:")
 	w("\tRET")
 	w("gvoob:")
-	w("\tB\tkov_oob")
+	w("\tB\tovr_oob")
 	return b.String()
 }

@@ -277,4 +277,4 @@ sg1next:
 sgdone:
 	RET
 sgoob:
-	B	kov_oob
+	B	ovr_oob

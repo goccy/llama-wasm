@@ -343,4 +343,4 @@ sgdone:
 	RET
 sgoob:
 	VZEROUPPER
-	JMP	kov_oob
+	JMP	ovr_oob

@@ -437,6 +437,6 @@ func x64RepackGemmKernel(sym string, feature string, pool *ConstPool, wide bool)
 	w("\tRET")
 	w("gemmoob:")
 	w("\tVZEROUPPER")
-	w("\tJMP\tkov_oob")
+	w("\tJMP\tovr_oob")
 	return b.String()
 }

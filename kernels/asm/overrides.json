@@ -1,7 +1,7 @@
 {
   "version": 1,
   "memory64": true,
-  "kernels": [
+  "functions": [
     {
       "export": "dbg_gemm_q8_0_4x4",
       "params": [

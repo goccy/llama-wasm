@@ -412,4 +412,4 @@ gemmstore:
 gemmdone:
 	RET
 gemmoob:
-	B	kov_oob
+	B	ovr_oob

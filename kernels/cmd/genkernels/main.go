@@ -1,7 +1,7 @@
-// genkernels writes the kernel-override bodies and manifest that
-// llama-wasm hands to wasm2go (docs/kernel-overrides.md there): one
+// genkernels writes the assembly-override bodies and manifest that
+// llama-wasm hands to wasm2go (docs/asm-overrides.md there): one
 // assembly file per export, architecture and CPU feature level, plus
-// kernels.json describing the exports' wasm signatures.
+// overrides.json describing the exports' wasm signatures.
 //
 //	go run ./cmd/genkernels -out ../asm
 //
@@ -20,7 +20,7 @@ import (
 )
 
 func main() {
-	out := flag.String("out", "asm", "output directory for the bodies and kernels.json")
+	out := flag.String("out", "asm", "output directory for the bodies and overrides.json")
 	flag.Parse()
 	if err := run(*out); err != nil {
 		fmt.Fprintln(os.Stderr, "genkernels:", err)
@@ -47,5 +47,5 @@ func run(out string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(out, "kernels.json"), append(data, '\n'), 0o644)
+	return os.WriteFile(filepath.Join(out, "overrides.json"), append(data, '\n'), 0o644)
 }

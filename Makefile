@@ -157,15 +157,15 @@ WASM2GO_TUNING = \
 	WASM2GO_FUSE_LOOP=1 \
 	WASM2GO_FUSE_LOOP_UNROLL=4 \
 	WASM2GO_FAST_MATH=$(WASM2GO_FAST_MATH) \
-	WASM2GO_KERNEL_OVERRIDES=$(WASM2GO_KERNEL_OVERRIDES)
+	WASM2GO_ASM_OVERRIDES=$(WASM2GO_ASM_OVERRIDES)
 WASM2GO_ENV ?= $(addprefix -e ,$(WASM2GO_TUNING))
 WASM2GO_FAST_MATH ?= 1
-# The kernel-override manifest (wasm2go -kernel-overrides): the
-# assembly bodies kernels/ generates for the dbg_* exports, wrapped by
-# wasm2go in its override ABI and dispatched on CPU features. Empty
-# transpiles every export from the wasm. `make kernels` regenerates the
-# bodies from kernels/internal/asm.
-WASM2GO_KERNEL_OVERRIDES ?= kernels/asm/kernels.json
+# The assembly-override manifest (wasm2go -asm-overrides): the bodies
+# kernels/ generates for the dbg_* exports, wrapped by wasm2go in its
+# override ABI and dispatched on CPU features. Empty transpiles every
+# export from the wasm. Regenerate with `cd kernels && go run
+# ./cmd/genkernels -out asm` after changing a generator.
+WASM2GO_ASM_OVERRIDES ?= kernels/asm/overrides.json
 
 print-wasm2go-env:
 	@for v in $(WASM2GO_TUNING); do echo "export $$v"; done

@@ -66,4 +66,4 @@ vmtail1:
 vmdone:
 	RET
 vmoob:
-	B	kov_oob
+	B	ovr_oob

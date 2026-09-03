@@ -411,6 +411,6 @@ func a64RepackGemmKernel(sym string, feature string, wide bool) string {
 	w("gemmdone:")
 	w("\tRET")
 	w("gemmoob:")
-	w("\tB\tkov_oob")
+	w("\tB\tovr_oob")
 	return b.String()
 }

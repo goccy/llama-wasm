@@ -192,7 +192,7 @@ func x64VecSoftMaxKernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tRET")
 	w("smoob:")
 	w("\tVZEROUPPER")
-	w("\tJMP\tkov_oob")
+	w("\tJMP\tovr_oob")
 	return sb.String()
 }
 
@@ -255,6 +255,6 @@ func x64VecSwigluKernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tRET")
 	w("swoob:")
 	w("\tVZEROUPPER")
-	w("\tJMP\tkov_oob")
+	w("\tJMP\tovr_oob")
 	return sb.String()
 }

@@ -1,11 +1,11 @@
 package asm
 
-// Manifest describes the kernel overrides in the shape wasm2go's
-// -kernel-overrides loader reads (wasm2go docs/kernel-overrides.md).
+// Manifest describes the assembly overrides in the shape wasm2go's
+// -assembly-overrides loader reads (wasm2go docs/assembly-overrides.md).
 type Manifest struct {
 	Version  int      `json:"version"`
 	Memory64 bool     `json:"memory64"`
-	Kernels  []Kernel `json:"kernels"`
+	Kernels  []Kernel `json:"functions"`
 }
 
 // Kernel is one exported function and its bodies.

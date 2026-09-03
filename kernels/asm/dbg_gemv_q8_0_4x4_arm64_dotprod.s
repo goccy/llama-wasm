@@ -199,4 +199,4 @@ gv1store:
 gvdone:
 	RET
 gvoob:
-	B	kov_oob
+	B	ovr_oob

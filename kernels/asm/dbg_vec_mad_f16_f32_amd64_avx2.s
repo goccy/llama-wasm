@@ -76,4 +76,4 @@ vmdone:
 	RET
 vmoob:
 	VZEROUPPER
-	JMP	kov_oob
+	JMP	ovr_oob

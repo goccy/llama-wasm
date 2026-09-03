@@ -104,4 +104,4 @@ vdreduce:
 	RET
 vdoob:
 	VZEROUPPER
-	JMP	kov_oob
+	JMP	ovr_oob

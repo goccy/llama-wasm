@@ -10,10 +10,10 @@ import (
 	"testing"
 )
 
-// wrap renders a body the way wasm2go's kernel-override wrapper does
-// (wasm2go docs/kernel-overrides.md): the TEXT header, the prologue that
+// wrap renders a body the way wasm2go's assembly-override wrapper does
+// (wasm2go docs/assembly-overrides.md): the TEXT header, the prologue that
 // loads the linear-memory base and size into the contract registers,
-// the body, and the kov_oob epilogue. The tests' mockModule keeps the
+// the body, and the ovr_oob epilogue. The tests' mockModule keeps the
 // memory-size pointer at offset 0 and the memory base at offset 8, and
 // the epilogue calls the test's trapstub.
 func wrap(arch, sym string, frame, argBytes int, feature, body string) string {
@@ -26,7 +26,7 @@ func wrap(arch, sym string, frame, argBytes int, feature, body string) string {
 		b.WriteString("\tMOVQ\tm+0(FP), AX\n\tMOVQ\t0(AX), R15\n\tMOVQ\t(R15), R15\n\tMOVQ\t8(AX), R14\n")
 	}
 	b.WriteString(strings.TrimRight(body, "\n"))
-	b.WriteString("\nkov_oob:\n")
+	b.WriteString("\novr_oob:\n")
 	if arch == "amd64" && feature != "sse4" {
 		b.WriteString("\tVZEROUPPER\n")
 	}

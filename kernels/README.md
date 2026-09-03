@@ -3,9 +3,9 @@
 wasm2go lowers `llama.wasm` from the wasm itself. For a handful of leaf
 compute kernels its lowering is still well short of what the CPU can
 do, and this directory supplies those bodies by hand through wasm2go's
-**kernel-override** mechanism (see `docs/kernel-overrides.md` in
+**assembly-override** mechanism (see `docs/asm-overrides.md` in
 wasm2go): the wasm build exports each kernel under a `dbg_*` name (see
-`patches/`), `asm/kernels.json` names the exports with their wasm
+`patches/`), `asm/overrides.json` names the exports with their wasm
 signatures, and `asm/*.s` hold one body per architecture and CPU
 feature level. wasm2go validates the manifest against the module,
 wraps each body in its fixed ABI, dispatches on CPU features at run
@@ -19,7 +19,7 @@ knows a block layout lives here.
 A body must stay inside the wasm execution model:
 
 - linear memory only, through the base and size wasm2go hands it, every
-  range checked before use and a miss sent to `kov_oob` (the module's
+  range checked before use and a miss sent to `ovr_oob` (the module's
   out-of-bounds trap);
 - no calls: no host imports, no other functions, no Go runtime;
 - the same result as the wasm function, up to the rounding this
@@ -48,9 +48,9 @@ would retire the addition.
   reference over every length class it handles (vector body, tails,
   empty), executed on the host when it has the feature and assembled
   and linked everywhere.
-- `cmd/genkernels/` — writes `asm/*.s` and `asm/kernels.json`.
+- `cmd/genkernels/` — writes `asm/*.s` and `asm/overrides.json`.
 - `asm/` — the generated, checked-in output the build consumes
-  (`WASM2GO_KERNEL_OVERRIDES` in the Makefile).
+  (`WASM2GO_ASM_OVERRIDES` in the Makefile).
 
 Regenerate after changing a generator:
 

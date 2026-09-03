@@ -7,7 +7,7 @@ import (
 )
 
 // ConstPool interns the constant blobs a body references, under the
-// kov_ prefix the kernel-override contract reserves for a body's own
+// ovr_ prefix the assembly-override contract reserves for a body's own
 // data, and renders them as DATA/GLOBL entries appended to the body.
 type ConstPool struct {
 	// prefix keeps one body's data symbols distinct from another's:
@@ -18,7 +18,7 @@ type ConstPool struct {
 	blobs  map[string][]byte
 }
 
-// NewConstPool returns a pool whose symbols carry prefix after kov_.
+// NewConstPool returns a pool whose symbols carry prefix after ovr_.
 func NewConstPool(prefix string) *ConstPool {
 	return &ConstPool{prefix: prefix}
 }
@@ -29,7 +29,7 @@ func (p *ConstPool) addBlob(blob []byte) string {
 	if p.blobs == nil {
 		p.blobs = map[string][]byte{}
 	}
-	name := fmt.Sprintf("kov_%sb%d_%x", p.prefix, len(blob), blob)
+	name := fmt.Sprintf("ovr_%sb%d_%x", p.prefix, len(blob), blob)
 	p.blobs[name] = append([]byte(nil), blob...)
 	return name
 }
