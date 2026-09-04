@@ -299,8 +299,10 @@ func x64RepackGemvKernel(sym string, feature string, pool *ConstPool, wide bool)
 	}
 	chunkLoop("gv", avx2Pre, 64, avx2Pass)
 
-	// ---- VNNI nest: scratch per block = 32 bytes of u8 quads (xor
-	// 0x80) followed by the block's byte sum as i32 x4 (16 bytes).
+	// ---- VNNI nest: scratch per block = four 32-byte activation
+	// pairs [quad 2j x4 | quad 2j+1 x4] kept as s8 (the +128 bias
+	// sits on the WEIGHT side, applied in-register per block),
+	// followed by 128 x the block's byte sum as i32 x4 (16 bytes).
 	vnniPre := func() {
 		w("\tVMOVDQU\t2(AX), X4")
 		w("\tVMOVDQU\t18(AX), X5")
@@ -354,10 +356,15 @@ func x64RepackGemvKernel(sym string, feature string, pool *ConstPool, wide bool)
 			w("\tVPADDD\tX4, X%d, X%d", g, g)
 			w("\tVPSUBD\t128(R11), X%d, X%d", g, g) // - 128 * sum(a)
 			w("\tVCVTDQ2PS\tX%d, X%d", g, g)
-			w("\tVMOVQ\t(%s), X7", cur)
-			w("\tVCVTPH2PS\tX7, X7")
-			w("\tVMULPS\tX6, X7, X7")
-			w("\tVMULPS\tX7, X%d, X%d", g, g)
+			// The column scales load into X4 (free after the fold above),
+			// NOT X7: a VEX VMOVQ zeroes the whole upper ymm, and Y7 is
+			// still group 1's live odd-pair accumulator (vnniAccB) until
+			// its own fold — an X7 load here corrupts group 1 of every
+			// four-group pass.
+			w("\tVMOVQ\t(%s), X4", cur)
+			w("\tVCVTPH2PS\tX4, X4")
+			w("\tVMULPS\tX6, X4, X4")
+			w("\tVMULPS\tX4, X%d, X%d", g, g)
 			w("\tVADDPS\tX%d, X%d, X%d", g, 8+g, 8+g)
 		}
 	}
