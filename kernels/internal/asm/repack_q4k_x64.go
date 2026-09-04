@@ -57,6 +57,12 @@ const (
 	// base | 40 column groups left | 48 row groups left | 56 bs bytes |
 	// 64 group stride.
 	x64Q4KFrame = 80
+	// tiled GEMM frame: 0 bsum pairs of the four rows (4 x 16) | 64 half-0
+	// i32 partials (4 x 32) | 192 sumi accumulators (4 x 32) | 320 bias
+	// accumulators (4 x 32) | 448 f32 accumulators (4 x 32) | 576 vx |
+	// 584 activation base | 592 tile output | 600 column groups left |
+	// 608 row groups left | 616 bs bytes | 624 group stride.
+	x64Q4KTileFrame = 640
 )
 
 // x64Q4KScalesMins decodes the 12 packed bytes at off(reg) into R13 =
@@ -305,15 +311,132 @@ func x64GemvQ4K8x8Kernel(sym string, pool *ConstPool, wide bool) string {
 	return sb.String()
 }
 
-// x64GemmQ4K8x8Kernel emits the AVX2 GEMM under sym: four passes of the
-// GEMV body per (row group, column group), each addressing its row of
-// the block_q8_Kx4 activations. The loop state lives on the frame (the
-// body clobbers every scratch register).
+// x64Q4KGemmTile emits the block loop of one (row group, column group)
+// tile: the four block_q8_Kx4 rows share every weight load, nibble
+// unpack and scale decode. Y0..Y3 the rows' i16 pair sums of the current
+// (nibble, column half), Y6/Y12 the sub-block scales (low/high nibbles,
+// i32, hadd order), Y5 the mins pairs, Y7 weights, Y8 0x0f, Y9 i16 ones,
+// X10 shuffle, Y11 permute, Y13/Y4 the block's d/dmin column scales,
+// Y14/Y15 scratch. On entry: SI = weight group, DX = activation row
+// group, CX = nb. The row accumulators live on the frame (see
+// x64Q4KTileFrame).
+func x64Q4KGemmTile(w func(string, ...any)) {
+	w("\tVXORPS\tY0, Y0, Y0")
+	for r := 0; r < 4; r++ {
+		w("\tVMOVUPS\tY0, %d(SP)", 448+32*r) // f32 accumulators
+	}
+	w("\tMOVQ\tCX, R8")
+	w("\tMOVQ\tSI, R9")
+	w("gtblk:")
+	// block-sum pairs of the eight sub-blocks per row -> frame [0..64)
+	for r := 0; r < 4; r++ {
+		for q := 0; q < 4; q++ {
+			w("\tMOVWLSX\t%d(DX), AX", q8Kx4BsumsOff+32*q+8*r)
+			w("\tMOVWLSX\t%d(DX), BX", q8Kx4BsumsOff+32*q+8*r+2)
+			w("\tADDL\tBX, AX")
+			w("\tMOVW\tAX, %d(SP)", 16*r+4*q)
+			w("\tMOVWLSX\t%d(DX), AX", q8Kx4BsumsOff+32*q+8*r+4)
+			w("\tMOVWLSX\t%d(DX), BX", q8Kx4BsumsOff+32*q+8*r+6)
+			w("\tADDL\tBX, AX")
+			w("\tMOVW\tAX, %d(SP)", 16*r+4*q+2)
+		}
+	}
+	w("\tVPXOR\tY0, Y0, Y0")
+	for r := 0; r < 4; r++ {
+		w("\tVMOVDQU\tY0, %d(SP)", 192+32*r) // sumi
+		w("\tVMOVDQU\tY0, %d(SP)", 320+32*r) // bias
+	}
+	for sb := 0; sb < 4; sb++ {
+		// scales/mins of sub-blocks 2sb (low nibbles) and 2sb+1 (high)
+		x64Q4KScalesMins(w, "R9", q4Kx8ScalesOff+24*sb)
+		w("\tVMOVQ\tR13, X6")
+		w("\tVMOVQ\tR10, X7")
+		x64Q4KScalesMins(w, "R9", q4Kx8ScalesOff+24*sb+12)
+		w("\tVMOVQ\tR13, X12")
+		w("\tVMOVQ\tR10, X15")
+		w("\tVPSHUFB\tX10, X6, X6")
+		w("\tVPSHUFB\tX10, X12, X12")
+		w("\tVPSHUFB\tX10, X7, X7")
+		w("\tVPSHUFB\tX10, X15, X15")
+		w("\tVPUNPCKLBW\tX15, X7, X7")
+		w("\tVPMOVZXBW\tX7, Y5") // mins pairs, 16 x i16
+		w("\tVPMOVZXBD\tX6, Y6")
+		w("\tVPMOVZXBD\tX12, Y12")
+		// bias[r] += pairs . (bsum_lo, bsum_hi) of this chunk
+		for r := 0; r < 4; r++ {
+			w("\tVPBROADCASTD\t%d(SP), Y15", 16*r+4*sb)
+			w("\tVPMADDWD\tY15, Y5, Y15")
+			w("\tVPADDD\t%d(SP), Y15, Y15", 320+32*r)
+			w("\tVMOVDQU\tY15, %d(SP)", 320+32*r)
+		}
+		for nib := 0; nib < 2; nib++ {
+			for half := 0; half < 2; half++ {
+				for r := 0; r < 4; r++ {
+					w("\tVPXOR\tY%d, Y%d, Y%d", r, r, r)
+				}
+				for k := 0; k < 4; k++ {
+					w("\tVMOVDQU\t%d(R9), Y7", q4Kx8QsOff+256*sb+64*k+32*half)
+					if nib == 0 {
+						w("\tVPAND\tY8, Y7, Y7")
+					} else {
+						w("\tVPSRLW\t$4, Y7, Y7")
+						w("\tVPAND\tY8, Y7, Y7")
+					}
+					for r := 0; r < 4; r++ {
+						w("\tVPBROADCASTQ\t%d(DX), Y15", q8Kx4QsOff+32*(8*sb+4*nib+k)+8*r)
+						w("\tVPMADDUBSW\tY15, Y7, Y14")
+						w("\tVPADDW\tY14, Y%d, Y%d", r, r)
+					}
+				}
+				for r := 0; r < 4; r++ {
+					w("\tVPMADDWD\tY9, Y%d, Y%d", r, r)
+					if half == 0 {
+						w("\tVMOVDQU\tY%d, %d(SP)", r, 64+32*r)
+						continue
+					}
+					w("\tVMOVDQU\t%d(SP), Y14", 64+32*r)
+					w("\tVPHADDD\tY%d, Y14, Y14", r) // [c0 c1 c4 c5 | c2 c3 c6 c7]
+					if nib == 0 {
+						w("\tVPMULLD\tY6, Y14, Y14")
+					} else {
+						w("\tVPMULLD\tY12, Y14, Y14")
+					}
+					w("\tVPADDD\t%d(SP), Y14, Y14", 192+32*r)
+					w("\tVMOVDQU\tY14, %d(SP)", 192+32*r)
+				}
+			}
+		}
+	}
+	// fold: f32[r] += sumi[r] * d * yd[r] - bias[r] * dmin * yd[r] (hadd order)
+	w("\tVCVTPH2PS\t(R9), Y13")
+	w("\tVPERMPS\tY13, Y11, Y13")
+	w("\tVCVTPH2PS\t16(R9), Y4")
+	w("\tVPERMPS\tY4, Y11, Y4")
+	for r := 0; r < 4; r++ {
+		w("\tVBROADCASTSS\t%d(DX), Y15", 4*r)
+		w("\tVMULPS\tY15, Y13, Y14")
+		w("\tVMULPS\tY15, Y4, Y15")
+		w("\tVCVTDQ2PS\t%d(SP), Y0", 192+32*r)
+		w("\tVCVTDQ2PS\t%d(SP), Y1", 320+32*r)
+		w("\tVMOVUPS\t%d(SP), Y2", 448+32*r)
+		w("\tVFMADD231PS\tY14, Y0, Y2")
+		w("\tVFNMADD231PS\tY15, Y1, Y2")
+		w("\tVMOVUPS\tY2, %d(SP)", 448+32*r)
+	}
+	w("\tADDQ\t$%d, R9", q4Kx8BlockBytes)
+	w("\tADDQ\t$%d, DX", q8Kx4BlockBytes)
+	w("\tDECQ\tR8")
+	w("\tJNZ\tgtblk")
+}
+
+// x64GemmQ4K8x8Kernel emits the AVX2 GEMM under sym: one tile of four
+// activation rows per (row group, column group), the weight decode
+// shared by the rows (see x64Q4KGemmTile).
 func x64GemmQ4K8x8Kernel(sym string, pool *ConstPool, wide bool) string {
 	var sb strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&sb, format+"\n", args...) }
 	cSym := pool.addBlob(x64Q4KConsts())
-	w("// %s: q4_K 8x8 repack GEMM (AVX2), one activation row per pass.", sym)
+	w("// %s: q4_K 8x8 repack GEMM (AVX2), four activation rows per weight decode.", sym)
 	x64Q4KPrologue(w, wide, true, "gmoob")
 	w("\tTESTQ\tR11, R11")
 	w("\tJZ\tgmdone")
@@ -325,41 +448,44 @@ func x64GemmQ4K8x8Kernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tVMOVDQU\t·%s+%d(SB), Y9", cSym, x64q4kOnes)
 	w("\tVMOVDQU\t·%s+%d(SB), X10", cSym, x64q4kShuf)
 	w("\tVMOVDQU\t·%s+%d(SB), Y11", cSym, x64q4kPerm)
-	w("\tMOVQ\tSI, 16(SP)")  // vx
-	w("\tMOVQ\tDX, 24(SP)")  // activation base of the row group
-	w("\tMOVQ\tDI, 32(SP)")  // tile output base
-	w("\tMOVQ\tR12, 48(SP)") // row groups left
-	w("\tMOVQ\tR13, 56(SP)") // bs bytes
-	w("\tMOVQ\tR10, 64(SP)") // group stride
+	w("\tMOVQ\tSI, 576(SP)")  // vx
+	w("\tMOVQ\tDX, 584(SP)")  // activation base of the row group
+	w("\tMOVQ\tDI, 592(SP)")  // tile output base
+	w("\tMOVQ\tR11, 600(SP)") // column groups
+	w("\tMOVQ\tR12, 608(SP)") // row groups left
+	w("\tMOVQ\tR13, 616(SP)") // bs bytes
+	w("\tMOVQ\tR10, 624(SP)") // group stride
 	w("gmrows:")
-	w("\tMOVQ\t16(SP), SI")
-	w("\tMOVLQZX\tl6+%d(FP), AX", 52)
-	w("\tSHRQ\t$3, AX")
-	w("\tMOVQ\tAX, 40(SP)") // column groups left
+	w("\tMOVQ\t576(SP), SI")
+	w("\tMOVQ\t600(SP), R11")
 	w("gmcols:")
-	for row := 0; row < 4; row++ {
-		w("\tMOVQ\t24(SP), DX")
-		w("\tMOVQ\t32(SP), DI")
-		for i := 0; i < row; i++ {
-			w("\tADDQ\t56(SP), DI")
+	w("\tMOVQ\t584(SP), DX")
+	x64Q4KGemmTile(w)
+	// store the four rows (hadd order -> column order)
+	w("\tMOVQ\t592(SP), DI")
+	for r := 0; r < 4; r++ {
+		w("\tVMOVUPS\t%d(SP), Y0", 448+32*r)
+		w("\tVPERMPS\tY0, Y11, Y0")
+		w("\tVMOVUPS\tY0, (DI)")
+		if r < 3 {
+			w("\tADDQ\t616(SP), DI")
 		}
-		x64Q4K8x8Body(w, fmt.Sprintf("gmr%d", row), true, row)
 	}
-	w("\tADDQ\t$32, 32(SP)")
-	w("\tADDQ\t64(SP), SI")
-	w("\tDECQ\t40(SP)")
+	w("\tADDQ\t$32, 592(SP)")
+	w("\tADDQ\t624(SP), SI")
+	w("\tDECQ\tR11")
 	w("\tJNZ\tgmcols")
 	// next row group: activations advance nb blocks; the tile base moves
 	// back by the columns written and down four rows.
 	w("\tIMUL3Q\t$%d, CX, AX", q8Kx4BlockBytes)
-	w("\tADDQ\tAX, 24(SP)")
-	w("\tMOVLQZX\tl6+%d(FP), AX", 52)
-	w("\tSHLQ\t$2, AX") // nc*4 bytes
-	w("\tSUBQ\tAX, 32(SP)")
-	w("\tMOVQ\t56(SP), AX")
+	w("\tADDQ\tAX, 584(SP)")
+	w("\tMOVQ\t600(SP), AX")
+	w("\tSHLQ\t$5, AX") // groups * 32 bytes
+	w("\tSUBQ\tAX, 592(SP)")
+	w("\tMOVQ\t616(SP), AX")
 	w("\tSHLQ\t$2, AX") // 4 rows
-	w("\tADDQ\tAX, 32(SP)")
-	w("\tDECQ\t48(SP)")
+	w("\tADDQ\tAX, 592(SP)")
+	w("\tDECQ\t608(SP)")
 	w("\tJNZ\tgmrows")
 	w("gmdone:")
 	w("\tVZEROUPPER")

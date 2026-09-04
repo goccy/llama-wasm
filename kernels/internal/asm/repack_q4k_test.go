@@ -291,7 +291,7 @@ func TestX64Q4K8x8KernelShape(t *testing.T) {
 		}
 	}
 	b := x64GemmQ4K8x8Kernel("Fn8avx2", pool, true)
-	for _, want := range []string{"VBROADCASTSS\t12(DX), Y12", "MOVWLSX\t1070(DX), BX", "VPBROADCASTQ\t1000(DX), Y15", "gmr3blk:", "DECQ\t48(SP)"} {
+	for _, want := range []string{"VBROADCASTSS\t12(DX), Y15", "MOVWLSX\t1070(DX), BX", "VPBROADCASTQ\t1000(DX), Y15", "gtblk:", "DECQ\t608(SP)"} {
 		if !strings.Contains(b, want) {
 			t.Errorf("x64 q4_K 8x8 gemm missing %q", want)
 		}
@@ -302,11 +302,12 @@ func TestX64Q4K8x8KernelGate(t *testing.T) {
 	_, argBytes := repackGemmArgs(true)
 	var asm string
 	for _, k := range []struct {
-		sym string
-		gen func(string, *ConstPool, bool) string
-	}{{"GemvKernel", x64GemvQ4K8x8Kernel}, {"GemmKernel", x64GemmQ4K8x8Kernel}} {
+		sym   string
+		frame int
+		gen   func(string, *ConstPool, bool) string
+	}{{"GemvKernel", x64Q4KFrame, x64GemvQ4K8x8Kernel}, {"GemmKernel", x64Q4KTileFrame, x64GemmQ4K8x8Kernel}} {
 		pool := NewConstPool(k.sym + "_")
-		asm += wrap("amd64", k.sym, x64Q4KFrame, argBytes, "avx2", k.gen(k.sym, pool, true)+"\n"+pool.Emit())
+		asm += wrap("amd64", k.sym, k.frame, argBytes, "avx2", k.gen(k.sym, pool, true)+"\n"+pool.Emit())
 	}
 	dir := t.TempDir()
 	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+kQuantRunSrc+q4Kx8RunSrc+q4Kx8Decls, q4Kx8RunTest)

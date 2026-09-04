@@ -153,7 +153,7 @@ func Overrides() *Manifest {
 				Params: []string{"i32", "i64", "i64", "i64", "i64", "i32", "i32"},
 				Bodies: []Body{
 					body("dbg_gemm_q4_K_8x8", "arm64", "i8mm", a64GemmQ4KFrame, func(sym string, _ *ConstPool) string { return a64GemmQ4K8x8Kernel(sym, wide) }),
-					body("dbg_gemm_q4_K_8x8", "amd64", "avx2", x64Q4KFrame, func(sym string, p *ConstPool) string { return x64GemmQ4K8x8Kernel(sym, p, wide) }),
+					body("dbg_gemm_q4_K_8x8", "amd64", "avx2", x64Q4KTileFrame, func(sym string, p *ConstPool) string { return x64GemmQ4K8x8Kernel(sym, p, wide) }),
 				},
 			},
 			{
