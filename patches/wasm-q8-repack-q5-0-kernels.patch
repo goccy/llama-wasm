@@ -1,0 +1,277 @@
+diff --git a/ggml/src/ggml-cpu/repack.h b/ggml/src/ggml-cpu/repack.h
+index cb21edf..581e530 100644
+--- a/ggml/src/ggml-cpu/repack.h
++++ b/ggml/src/ggml-cpu/repack.h
+@@ -40,6 +40,24 @@ using block_q8_0x4 = block<8, 4>;
+ using block_q8_0x8 = block<8, 8>;
+ using block_q8_0x16 = block<8, 16>;
+ 
++// Q5_0 repacked eight rows wide (the wasm build's prompt-path layout for
++// Q5_0 tensors; a wasm-to-native transpiler substitutes native GEMV/GEMM
++// bodies for the exported kernels). qs interleaves the eight rows'
++// nibble bytes in 8-byte groups exactly like block_q4_0x8 (group i holds
++// bytes 8*(i/8).. of row i%8; a byte carries element j in its low nibble
++// and element j+16 in its high nibble), without the sign xor: nibbles
++// stay 0..15 and the fifth bit adds 16, the -16 offset is applied by the
++// kernels. qh stores the fifth bits per 16-byte group m (= groups 2m,
++// 2m+1): qh[4m+0], qh[4m+1] are the bits of the two rows' low-nibble
++// elements 8*(m/4)..+8, qh[4m+2], qh[4m+3] those of the high-nibble
++// elements 16 later.
++struct block_q5_0x8 {
++    ggml_half d[8];
++    uint8_t   qh[32];
++    uint8_t   qs[128];
++};
++static_assert(sizeof(block_q5_0x8) == 8 * sizeof(ggml_half) + 32 + 128, "wrong q5_0x8 block size/padding");
++
+ struct block_q4_Kx8 {
+     ggml_half d[8];      // super-block scale for quantized scales
+     ggml_half dmin[8];   // super-block scale for quantized mins
+@@ -155,6 +173,7 @@ void ggml_gemv_iq4_nl_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const
+ void ggml_gemv_iq4_nl_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemv_mxfp4_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemv_mxfp4_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
++void ggml_gemv_q5_0_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemv_q8_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemv_q8_0_4x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemm_q4_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+@@ -171,6 +190,7 @@ void ggml_gemm_iq4_nl_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const
+ void ggml_gemm_iq4_nl_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemm_mxfp4_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemm_mxfp4_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
++void ggml_gemm_q5_0_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemm_q8_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemm_q8_0_4x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ #if defined __riscv_zvfh
+diff --git a/ggml/src/ggml-cpu/repack.cpp b/ggml/src/ggml-cpu/repack.cpp
+index 2b809d7..866e013 100644
+--- a/ggml/src/ggml-cpu/repack.cpp
++++ b/ggml/src/ggml-cpu/repack.cpp
+@@ -170,6 +170,12 @@ void ggml_quantize_mat_q8_0_4x4_generic(const float * GGML_RESTRICT x, void * GG
+     }
+ }
+ 
++#if defined(__wasm_simd128__)
++// On wasm this generic body IS ggml_quantize_mat_q8_0_4x8 (arch-fallback.h),
++// the activation quantizer of the 8-wide repack GEMMs; exported out of
++// line so a wasm-to-native transpiler can substitute a native body.
++__attribute__((noinline, export_name("dbg_quantize_mat_q8_0_4x8")))
++#endif
+ void ggml_quantize_mat_q8_0_4x8_generic(const float * GGML_RESTRICT x, void * GGML_RESTRICT vy, int64_t k) {
+     assert(QK8_0 == 32);
+     assert(k % QK8_0 == 0);
+@@ -3948,6 +3954,60 @@ template <> int repack<block_mxfp4, 8, 8>(struct ggml_tensor * t, const void * d
+     return repack_mxfp4_to_mxfp4_8_bl(t, 8, data, data_size);
+ }
+ 
++#if defined(__wasm_simd128__)
++// Q5_0 -> block_q5_0x8 (see repack.h for the layout).
++static block_q5_0x8 make_block_q5_0x8(const block_q5_0 * in) {
++    block_q5_0x8 out;
++    for (int i = 0; i < 8; i++) {
++        out.d[i] = in[i].d;
++    }
++    for (int i = 0; i < 16; i++) {
++        memcpy(&out.qs[8 * i], &in[i % 8].qs[(i / 8) * 8], 8);
++    }
++    for (int m = 0; m < 8; m++) {
++        const int c0 = 2 * (m % 4);
++        const int b  = m / 4;
++        out.qh[4 * m + 0] = in[c0].qh[b];
++        out.qh[4 * m + 1] = in[c0 + 1].qh[b];
++        out.qh[4 * m + 2] = in[c0].qh[2 + b];
++        out.qh[4 * m + 3] = in[c0 + 1].qh[2 + b];
++    }
++    return out;
++}
++
++static int repack_q5_0_to_q5_0_8_bl(struct ggml_tensor * t, const void * GGML_RESTRICT data, size_t data_size) {
++    GGML_ASSERT(t->type == GGML_TYPE_Q5_0);
++    constexpr int nrows_interleaved = 8;
++
++    block_q5_0x8 *     dst = (block_q5_0x8 *) t->data;
++    const block_q5_0 * src = (const block_q5_0 *) data;
++    block_q5_0         dst_tmp[8];
++    int                nrow    = ggml_nrows(t);
++    int                nblocks = t->ne[0] / QK5_0;
++
++    GGML_ASSERT(data_size == nrow * nblocks * sizeof(block_q5_0));
++
++    if (t->ne[1] % nrows_interleaved != 0 || t->ne[0] % 8 != 0) {
++        return -1;
++    }
++
++    for (int b = 0; b < nrow; b += nrows_interleaved) {
++        for (int64_t x = 0; x < nblocks; x++) {
++            for (int i = 0; i < nrows_interleaved; i++) {
++                dst_tmp[i] = src[x + i * nblocks];
++            }
++            *dst++ = make_block_q5_0x8(dst_tmp);
++        }
++        src += nrows_interleaved * nblocks;
++    }
++    return 0;
++}
++
++template <> int repack<block_q5_0, 8, 8>(struct ggml_tensor * t, const void * data, size_t data_size) {
++    return repack_q5_0_to_q5_0_8_bl(t, data, data_size);
++}
++#endif // __wasm_simd128__
++
+ template <> int repack<block_q8_0, 4, 4>(struct ggml_tensor * t, const void * data, size_t data_size) {
+     return repack_q8_0_to_q8_0_4_bl(t, 4, data, data_size);
+ }
+@@ -4045,6 +4105,12 @@ template <> void gemv<block_mxfp4, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_
+     ggml_gemv_mxfp4_8x8_q8_0(n, s, bs, vx, vy, nr, nc);
+ }
+ 
++#if defined(__wasm_simd128__)
++template <> void gemv<block_q5_0, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_t bs, const void * vx, const void * vy, int nr, int nc) {
++    ggml_gemv_q5_0_8x8_q8_0(n, s, bs, vx, vy, nr, nc);
++}
++#endif
++
+ template <> void gemv<block_q8_0, 4, 4, GGML_TYPE_Q8_0>(int n, float * s, size_t bs, const void * vx, const void * vy, int nr, int nc) {
+     ggml_gemv_q8_0_4x4_q8_0(n, s, bs, vx, vy, nr, nc);
+ }
+@@ -4142,6 +4208,12 @@ template <> void gemm<block_mxfp4, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_
+     ggml_gemm_mxfp4_8x8_q8_0(n, s, bs, vx, vy, nr, nc);
+ }
+ 
++#if defined(__wasm_simd128__)
++template <> void gemm<block_q5_0, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_t bs, const void * vx, const void * vy, int nr, int nc) {
++    ggml_gemm_q5_0_8x8_q8_0(n, s, bs, vx, vy, nr, nc);
++}
++#endif
++
+ template <> void gemm<block_q8_0, 4, 4, GGML_TYPE_Q8_0>(int n, float * s, size_t bs, const void * vx, const void * vy, int nr, int nc) {
+     ggml_gemm_q8_0_4x4_q8_0(n, s, bs, vx, vy, nr, nc);
+ }
+@@ -4578,6 +4650,11 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
+ 
+     // instance for Q8_0
+     static const ggml::cpu::repack::tensor_traits<block_q8_0, 4, 4, GGML_TYPE_Q8_0> q8_0_4x4_q8_0;
++#if defined(__wasm_simd128__)
++    // instance for Q5_0 (wasm: the prompt path otherwise runs per-row vec_dot;
++    // native x86 reaches a GEMM through llamafile sgemm instead)
++    static const ggml::cpu::repack::tensor_traits<block_q5_0, 8, 8, GGML_TYPE_Q8_0> q5_0_8x8_q8_0;
++#endif
+     static const ggml::cpu::repack::tensor_traits<block_q8_0, 8, 4, GGML_TYPE_Q8_0> q8_0_4x8_q8_0;
+ 
+     // instances for RISC-V
+@@ -4726,6 +4803,12 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
+                 return &mxfp4_4x4_q8_0;
+             }
+         }
++#if defined(__wasm_simd128__)
++    } else if (cur->type == GGML_TYPE_Q5_0) {
++        if (cur->ne[1] % 8 == 0) {
++            return &q5_0_8x8_q8_0;
++        }
++#endif
+     } else if (cur->type == GGML_TYPE_Q8_0) {
+         if (ggml_cpu_has_neon() && ggml_cpu_has_matmul_int8()) {
+             if (cur->ne[1] % 4 == 0) {
+diff --git a/ggml/src/ggml-cpu/arch/wasm/repack.cpp b/ggml/src/ggml-cpu/arch/wasm/repack.cpp
+index 9db77fe..d414cd7 100644
+--- a/ggml/src/ggml-cpu/arch/wasm/repack.cpp
++++ b/ggml/src/ggml-cpu/arch/wasm/repack.cpp
+@@ -231,3 +231,98 @@ void ggml_gemm_q8_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const vo
+     ggml_gemm_q8_0_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
+ #endif
+ }
++
++// Q5_0 8x8 repack GEMV/GEMM (block_q5_0x8 weights, see repack.h). These
++// scalar bodies are the definition on wasm; they are exported under
++// dbg_* names so a wasm-to-native transpiler can substitute native
++// bodies (noinline keeps the call sites calling them). The quant of
++// element e of column c is nibble | fifth bit << 4, and the -16 offset
++// is folded in through the activation block sum: sum((q-16)*a) =
++// sum(q*a) - 16*sum(a).
++static inline int q5_0x8_quant(const block_q5_0x8 * b, int c, int e) {
++    // group of the 8-byte run holding this element's byte
++    const int byte_in_col = e & 15;          // qs byte index within the column's 16
++    const int i           = (byte_in_col / 8) * 8 + c;
++    const int t           = byte_in_col & 7;
++    const uint8_t byte    = b->qs[8 * i + t];
++    const int m           = i / 2;
++    const int par         = i & 1;
++    const int nib         = (e < 16) ? (byte & 0x0F) : (byte >> 4);
++    const uint8_t qh      = (e < 16) ? b->qh[4 * m + par] : b->qh[4 * m + 2 + par];
++    return nib | (((qh >> t) & 1) << 4);
++}
++
++__attribute__((noinline, export_name("dbg_gemv_q5_0_8x8")))
++void ggml_gemv_q5_0_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx,
++                             const void * GGML_RESTRICT vy, int nr, int nc) {
++    const int qk = QK8_0;
++    const int nb = n / qk;
++    assert(nr == 1);
++    assert(n % qk == 0);
++    assert(nc % 8 == 0);
++    UNUSED(bs);
++    UNUSED(nr);
++
++    const block_q8_0 * GGML_RESTRICT a_ptr = (const block_q8_0 *) vy;
++    for (int x = 0; x < nc / 8; x++) {
++        const block_q5_0x8 * GGML_RESTRICT b_ptr = (const block_q5_0x8 *) vx + (x * nb);
++        float sumf[8] = { 0 };
++        for (int l = 0; l < nb; l++) {
++            int asum = 0;
++            for (int e = 0; e < qk; e++) {
++                asum += a_ptr[l].qs[e];
++            }
++            const float da = GGML_CPU_FP16_TO_FP32(a_ptr[l].d);
++            for (int j = 0; j < 8; j++) {
++                int sumi = 0;
++                for (int e = 0; e < qk; e++) {
++                    sumi += q5_0x8_quant(&b_ptr[l], j, e) * a_ptr[l].qs[e];
++                }
++                sumf[j] += (float) (sumi - 16 * asum) * GGML_CPU_FP16_TO_FP32(b_ptr[l].d[j]) * da;
++            }
++        }
++        for (int j = 0; j < 8; j++) {
++            s[x * 8 + j] = sumf[j];
++        }
++    }
++}
++
++__attribute__((noinline, export_name("dbg_gemm_q5_0_8x8")))
++void ggml_gemm_q5_0_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx,
++                             const void * GGML_RESTRICT vy, int nr, int nc) {
++    const int qk = QK8_0;
++    const int nb = n / qk;
++    assert(n % qk == 0);
++    assert(nr % 4 == 0);
++    assert(nc % 8 == 0);
++
++    for (int y = 0; y < nr / 4; y++) {
++        const block_q8_0x4 * GGML_RESTRICT a_ptr = (const block_q8_0x4 *) vy + (y * nb);
++        for (int x = 0; x < nc / 8; x++) {
++            const block_q5_0x8 * GGML_RESTRICT b_ptr = (const block_q5_0x8 *) vx + (x * nb);
++            float sumf[4][8] = { { 0 } };
++            for (int l = 0; l < nb; l++) {
++                for (int m = 0; m < 4; m++) {
++                    // row m's element e sits at qs[(e/8)*32 + m*8 + e%8]
++                    int asum = 0;
++                    for (int e = 0; e < qk; e++) {
++                        asum += a_ptr[l].qs[(e / 8) * 32 + m * 8 + (e % 8)];
++                    }
++                    const float da = GGML_CPU_FP16_TO_FP32(a_ptr[l].d[m]);
++                    for (int j = 0; j < 8; j++) {
++                        int sumi = 0;
++                        for (int e = 0; e < qk; e++) {
++                            sumi += q5_0x8_quant(&b_ptr[l], j, e) * a_ptr[l].qs[(e / 8) * 32 + m * 8 + (e % 8)];
++                        }
++                        sumf[m][j] += (float) (sumi - 16 * asum) * GGML_CPU_FP16_TO_FP32(b_ptr[l].d[j]) * da;
++                    }
++                }
++            }
++            for (int m = 0; m < 4; m++) {
++                for (int j = 0; j < 8; j++) {
++                    s[(y * 4 + m) * bs + x * 8 + j] = sumf[m][j];
++                }
++            }
++        }
++    }
++}

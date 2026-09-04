@@ -40,6 +40,9 @@ would retire the addition.
 | `dbg_vec_swiglu_f32` | SwiGLU row | arm64 neon, amd64 avx2 | same as soft_max |
 | `dbg_vec_dot_f16` | f16 dot (single-query attention K·Q) | arm64 neon, amd64 avx2 | lower the f16-table gather to FCVTL/VCVTPH2PS + FMA |
 | `dbg_vec_mad_f16_f32` | f16-by-f32 multiply-add (attention V accumulate) | arm64 neon, amd64 avx2 | same as `dbg_vec_dot_f16` |
+| `dbg_gemv_q5_0_8x8` | q5_0_8x8 repack GEMV (Q5_0 decode matmul, rows a multiple of 8) | arm64 dotprod, amd64 avx2 | SDOT/VPMADDUBSW over the eight interleaved rows, fifth bits expanded with TBL/VPSHUFB, -16 folded through the block sum |
+| `dbg_gemm_q5_0_8x8` | q5_0_8x8 x q8_0x4 repack GEMM (Q5_0 prompt matmul; native x86 reaches a GEMM here through llamafile sgemm) | arm64 i8mm, amd64 avx2 | SMMLA 2x2 tiles / four activation rows per unpacked run |
+| `dbg_quantize_mat_q8_0_4x8` | f32 rows -> block_q8_0x4 (the 8-wide repack GEMMs' activation quantizer; scalar in every ggml build) | arm64 neon, amd64 avx2 | FMAXV amax, FCVTAS quants |
 | `dbg_quantize_mat_q8_K_4x8` | f32 rows -> block_q8_Kx4 (the repack GEMM's activation quantizer; scalar in every ggml build) | arm64 neon, amd64 avx2 | FMAXV/FMINV max, FCVTNS quants, ADDV chunk sums |
 | `dbg_gemv_q4_K_8x8` | q4_K_8x8 repack GEMV (Q4_K decode matmul, rows a multiple of 8) | arm64 dotprod, amd64 avx2 | lower the 8-row nibble dot to SDOT/VPMADDUBSW with the 6-bit scales decoded once per block |
 | `dbg_gemm_q4_K_8x8` | q4_K_8x8 x q8_Kx4 repack GEMM (Q4_K prompt matmul) | arm64 i8mm, amd64 avx2 | register-blocked 8x4 int8 tile (SMMLA / VPMADDUBSW) with the block sums folded in as a bias |
