@@ -391,7 +391,8 @@ func x64VecDotQ6_KKernel(sym string, pool *ConstPool, wide bool) string {
 		w("\tTESTQ\tCX, CX")
 		w("\tJZ\tq6kred%s", sfx)
 		w("q6kblk%s:", sfx)
-		// scales (16 x i8) -> X2; q8sclsub = madd(bsums, scales_16) << 5 -> Y13
+		// scales (16 x i8) -> X2 (kept: each group's scale pair is a
+		// VPSHUFB of it); q8sclsub = madd(bsums, scales_16) << 5 -> Y13
 		w("\tVMOVDQU\t192(SI), X2")
 		w("\tVPMOVSXBW\tX2, Y13")
 		w("\tVPMADDWD\t260(DX), Y13, Y13")
@@ -408,13 +409,15 @@ func x64VecDotQ6_KKernel(sym string, pool *ConstPool, wide bool) string {
 			w("\tVPAND\tY8, Y3, Y6")             // bits1 & 15
 			w("\tVPOR\tY14, Y6, Y6")             // q4_0
 			w("\tVPMADDUBSW\t%d(DX), Y6, Y6", 4+128*j)
-			w("\tVPMOVSXBW\t%d(R11), Y14", 16*(4*j))
+			w("\tVPSHUFB\t%d(R11), X2, X14", 16*(4*j))
+			w("\tVPMOVSXBW\tX14, Y14")
 			w("\tVPMADDWD\tY6, Y14, Y6")
 			w("\tVPADDD\tY6, Y7, Y7")
 			w("\tVPAND\tY8, Y4, Y6") // bits2 & 15
 			w("\tVPOR\tY15, Y6, Y6") // q4_1
 			w("\tVPMADDUBSW\t%d(DX), Y6, Y6", 4+128*j+32)
-			w("\tVPMOVSXBW\t%d(R11), Y14", 16*(4*j+1))
+			w("\tVPSHUFB\t%d(R11), X2, X14", 16*(4*j+1))
+			w("\tVPMOVSXBW\tX14, Y14")
 			w("\tVPMADDWD\tY6, Y14, Y6")
 			w("\tVPADDD\tY6, Y7, Y7")
 			w("\tVPAND\tY11, Y5, Y14")  // H & 48 = q4h_2
@@ -424,14 +427,16 @@ func x64VecDotQ6_KKernel(sym string, pool *ConstPool, wide bool) string {
 			w("\tVPAND\tY8, Y6, Y6")
 			w("\tVPOR\tY14, Y6, Y6") // q4_2
 			w("\tVPMADDUBSW\t%d(DX), Y6, Y6", 4+128*j+64)
-			w("\tVPMOVSXBW\t%d(R11), Y14", 16*(4*j+2))
+			w("\tVPSHUFB\t%d(R11), X2, X14", 16*(4*j+2))
+			w("\tVPMOVSXBW\tX14, Y14")
 			w("\tVPMADDWD\tY6, Y14, Y6")
 			w("\tVPADDD\tY6, Y7, Y7")
 			w("\tVPSRLW\t$4, Y4, Y6")
 			w("\tVPAND\tY8, Y6, Y6")
 			w("\tVPOR\tY15, Y6, Y6") // q4_3
 			w("\tVPMADDUBSW\t%d(DX), Y6, Y6", 4+128*j+96)
-			w("\tVPMOVSXBW\t%d(R11), Y14", 16*(4*j+3))
+			w("\tVPSHUFB\t%d(R11), X2, X14", 16*(4*j+3))
+			w("\tVPMOVSXBW\tX14, Y14")
 			w("\tVPMADDWD\tY6, Y14, Y6")
 			w("\tVPADDD\tY6, Y7, Y7")
 		}

@@ -205,7 +205,7 @@ func TestX64VecDotQuantKernelShape(t *testing.T) {
 		}
 	}
 	c := x64VecDotQ6_KKernel("Fn6avx2", pool, true)
-	for _, want := range []string{"VPMADDWD\t260(DX), Y13, Y13", "VPSLLD\t$5, Y13, Y13", "VPMOVSXBW\t112(R11), Y14", "VPMADDUBSW\t228(DX), Y6, Y6", "VPSUBD\tY13, Y7, Y7", "MOVWLZX\t208(SI), R8", "q6kblkc:"} {
+	for _, want := range []string{"VPMADDWD\t260(DX), Y13, Y13", "VPSLLD\t$5, Y13, Y13", "VPSHUFB\t112(R11), X2, X14", "VPMOVSXBW\tX14, Y14", "VPMADDUBSW\t228(DX), Y6, Y6", "VPSUBD\tY13, Y7, Y7", "MOVWLZX\t208(SI), R8", "q6kblkc:"} {
 		if !strings.Contains(c, want) {
 			t.Errorf("x64 q6_K dot missing %q", want)
 		}
