@@ -50,8 +50,10 @@ func vecExpArgs(wide bool) (softmax map[string]int, softmaxArgBytes int, swiglu 
 // dup 192, v25 = dup 1.0 (bits 0x3f800000), v24 = dup 0x82000000,
 // v23 = dup 0x7f000000, v22 = dup r, v21 = dup p1, v20 = dup p3.
 type a64VecExp struct {
-	w    func(format string, args ...any)
-	word func(enc uint32, dis string)
+	// cbase relocates the twelve constant registers (see c); 0 = v20..v31.
+	cbase int
+	w     func(format string, args ...any)
+	word  func(enc uint32, dis string)
 }
 
 func (e *a64VecExp) fmlaV(d, n, m int) {
@@ -104,16 +106,27 @@ func (e *a64VecExp) sturQ(rt, rn, imm int) {
 
 // loadConsts materializes the constant registers from the pool blob.
 func (e *a64VecExp) loadConsts(sym string, reg int) {
+	c := e.c
 	e.w("\tMOVD\t$·%s(SB), R%d", sym, reg)
-	e.w("\tVLD1\t(R%d), [V28.S4, V29.S4, V30.S4, V31.S4]", reg)
-	e.dupLane(27, 30, 1) // 126
-	e.dupLane(26, 30, 2) // 192
-	e.dupLane(25, 30, 3) // 1.0
-	e.dupLane(24, 31, 0) // 0x82000000
-	e.dupLane(23, 31, 1) // 0x7f000000
-	e.dupLane(22, 28, 0) // r
-	e.dupLane(21, 29, 1) // p1
-	e.dupLane(20, 29, 3) // p3
+	e.w("\tVLD1\t(R%d), [V%d.S4, V%d.S4, V%d.S4, V%d.S4]", reg, c(28), c(29), c(30), c(31))
+	e.dupLane(c(27), c(30), 1) // 126
+	e.dupLane(c(26), c(30), 2) // 192
+	e.dupLane(c(25), c(30), 3) // 1.0
+	e.dupLane(c(24), c(31), 0) // 0x82000000
+	e.dupLane(c(23), c(31), 1) // 0x7f000000
+	e.dupLane(c(22), c(28), 0) // r
+	e.dupLane(c(21), c(29), 1) // p1
+	e.dupLane(c(20), c(29), 3) // p3
+}
+
+// c maps the constant register numbers the exp routine was written
+// with (v20..v31) to the block a kernel keeps them in: cbase + (v-20),
+// cbase 20 (the zero value) being the original placement.
+func (e *a64VecExp) c(v int) int {
+	if e.cbase == 0 {
+		return v
+	}
+	return e.cbase + v - 20
 }
 
 // exp computes v(out) = expf(v(x)) lane-wise, clobbering v0..v11
@@ -135,42 +148,42 @@ func (e *a64VecExp) exp(out, x int) {
 		m  = 11
 	)
 	// z = r + x*log2e ; n = z - r
-	e.mov(z, 22)
-	e.fmlaLane(z, x, 28, 1)
-	e.fsubV(n, z, 22)
+	e.mov(z, e.c(22))
+	e.fmlaLane(z, x, e.c(28), 1)
+	e.fsubV(n, z, e.c(22))
 	// b = x - n*c1 - n*c2
 	e.mov(b, x)
-	e.fmlsLane(b, n, 28, 2)
-	e.fmlsLane(b, n, 28, 3)
+	e.fmlsLane(b, n, e.c(28), 2)
+	e.fmlsLane(b, n, e.c(28), 3)
 	// e = bits(z) << 23 ; k = e + 1.0bits
 	e.word(0x4F375400|uint32(z)<<5|uint32(ee), fmt.Sprintf("shl v%d.4s, v%d.4s, #23", ee, z))
-	e.word(0x4EA08400|uint32(25)<<16|uint32(ee)<<5|uint32(k), fmt.Sprintf("add v%d.4s, v%d.4s, v25.4s", k, ee))
+	e.word(0x4EA08400|uint32(e.c(25))<<16|uint32(ee)<<5|uint32(k), fmt.Sprintf("add v%d.4s, v%d.4s, v%d.4s", k, ee, e.c(25)))
 	// an = |n| ; c = an > 126
 	e.word(0x4EA0F800|uint32(n)<<5|uint32(an), fmt.Sprintf("fabs v%d.4s, v%d.4s", an, n))
-	e.word(0x6EA0E400|uint32(27)<<16|uint32(an)<<5|uint32(c), fmt.Sprintf("fcmgt v%d.4s, v%d.4s, v27.4s", c, an))
+	e.word(0x6EA0E400|uint32(e.c(27))<<16|uint32(an)<<5|uint32(c), fmt.Sprintf("fcmgt v%d.4s, v%d.4s, v%d.4s", c, an, e.c(27)))
 	// u = b*b ; t1 = p1 + b*p0 ; t2 = p3 + b*p2 ; j = (p4*b) + (t2 + t1*u)*u
 	e.fmulV(u, b, b)
-	e.mov(t1, 21)
-	e.fmlaLane(t1, b, 29, 0)
-	e.mov(t2, 20)
-	e.fmlaLane(t2, b, 29, 2)
+	e.mov(t1, e.c(21))
+	e.fmlaLane(t1, b, e.c(29), 0)
+	e.mov(t2, e.c(20))
+	e.fmlaLane(t2, b, e.c(29), 2)
 	e.fmlaV(t2, t1, u)
-	e.fmulLane(m, b, 30, 0)
+	e.fmulLane(m, b, e.c(30), 0)
 	e.fmlaV(m, t2, u) // m = j
 	// res(t1) = k + j*k
 	e.mov(t1, k)
 	e.fmlaV(t1, m, k)
 	// d(z) = (n <= 0) & 0x82000000 ; s1(b) = d + 0x7f000000 ; s2(u) = e - d
 	e.word(0x6EA0D800|uint32(n)<<5|uint32(z), fmt.Sprintf("fcmle v%d.4s, v%d.4s, #0.0", z, n))
-	e.word(0x4E201C00|uint32(24)<<16|uint32(z)<<5|uint32(z), fmt.Sprintf("and v%d.16b, v%d.16b, v24.16b", z, z))
-	e.word(0x4EA08400|uint32(23)<<16|uint32(z)<<5|uint32(b), fmt.Sprintf("add v%d.4s, v%d.4s, v23.4s", b, z))
+	e.word(0x4E201C00|uint32(e.c(24))<<16|uint32(z)<<5|uint32(z), fmt.Sprintf("and v%d.16b, v%d.16b, v%d.16b", z, z, e.c(24)))
+	e.word(0x4EA08400|uint32(e.c(23))<<16|uint32(z)<<5|uint32(b), fmt.Sprintf("add v%d.4s, v%d.4s, v%d.4s", b, z, e.c(23)))
 	e.word(0x6EA08400|uint32(z)<<16|uint32(ee)<<5|uint32(u), fmt.Sprintf("sub v%d.4s, v%d.4s, v%d.4s", u, ee, z))
 	// alt(t2) = (s2 + s2*j) * s1 ; big(k) = s1*s1 ; cbig(n) = an > 192
 	e.mov(t2, u)
 	e.fmlaV(t2, u, m)
 	e.fmulV(t2, t2, b)
 	e.fmulV(k, b, b)
-	e.word(0x6EA0E400|uint32(26)<<16|uint32(an)<<5|uint32(n), fmt.Sprintf("fcmgt v%d.4s, v%d.4s, v26.4s", n, an))
+	e.word(0x6EA0E400|uint32(e.c(26))<<16|uint32(an)<<5|uint32(n), fmt.Sprintf("fcmgt v%d.4s, v%d.4s, v%d.4s", n, an, e.c(26)))
 	// out = cbig ? big : (c ? alt : res)
 	e.word(0x6E601C00|uint32(t1)<<16|uint32(t2)<<5|uint32(c), fmt.Sprintf("bsl v%d.16b, v%d.16b, v%d.16b", c, t2, t1))
 	e.word(0x6E601C00|uint32(c)<<16|uint32(k)<<5|uint32(n), fmt.Sprintf("bsl v%d.16b, v%d.16b, v%d.16b", n, k, c))

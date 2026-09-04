@@ -58,62 +58,94 @@ const (
 	faArgSize  = 96
 )
 
-// a64FlashAttnKernel emits the kernel under sym.
-//
-// Registers: R1 DK, R2 DV, R3 Q_q, R4 K row (advancing), R5 nbk1, R6 V
-// row (advancing), R7 nbv1, R8 mask element (advancing, 0 when no
-// mask), R9 positions left, R10 SM, R11 VKQ32; R12..R15 loop scratch.
-// Vectors: v12 S, v13 M, v14 scale, v15 slope, v16 -inf, v17 mv, v18
-// ms, v19 vs (scalars in lane 0); v20..v31 the exp constants; v0..v11
-// scratch (the exp routine clobbers v0..v11).
+// faEmitter carries the encoders the flash-attention bodies share.
+type faEmitter struct {
+	e *a64VecExp
+	q *a64Q
+	w func(format string, args ...any)
+}
+
+func newFAEmitter(sb *strings.Builder) *faEmitter {
+	e := &a64VecExp{}
+	e.w = func(format string, args ...any) { fmt.Fprintf(sb, format+"\n", args...) }
+	e.word = func(enc uint32, dis string) { e.w("\tWORD $0x%08x // %s", enc, dis) }
+	return &faEmitter{e: e, q: newA64Q(sb), w: e.w}
+}
+
+func (f *faEmitter) ldrQPost(rt, rn int) { // ldr q<rt>, [x<rn>], #16
+	f.e.word(0x3CC10400|uint32(rn)<<5|uint32(rt), fmt.Sprintf("ldr q%d, [x%d], #16", rt, rn))
+}
+func (f *faEmitter) ldrQ(rt, rn, off int) { // ldr q<rt>, [x<rn>, #off] (off multiple of 16)
+	f.e.word(0x3DC00000|uint32(off/16)<<10|uint32(rn)<<5|uint32(rt), fmt.Sprintf("ldr q%d, [x%d, #%d]", rt, rn, off))
+}
+func (f *faEmitter) strQ(rt, rn, off int) {
+	f.e.word(0x3D800000|uint32(off/16)<<10|uint32(rn)<<5|uint32(rt), fmt.Sprintf("str q%d, [x%d, #%d]", rt, rn, off))
+}
+func (f *faEmitter) fcmpS(n, m int) {
+	f.e.word(0x1E202000|uint32(m)<<16|uint32(n)<<5, fmt.Sprintf("fcmp s%d, s%d", n, m))
+}
+func (f *faEmitter) fsubS(d, n, m int) {
+	f.e.word(0x1E203800|lane3(d, n, m), fmt.Sprintf("fsub s%d, s%d, s%d", d, n, m))
+}
+func (f *faEmitter) fmulS(d, n, m int) {
+	f.e.word(0x1E200800|lane3(d, n, m), fmt.Sprintf("fmul s%d, s%d, s%d", d, n, m))
+}
+func (f *faEmitter) fmaddS(d, n, m, a int) {
+	f.e.word(0x1F000000|uint32(m)<<16|uint32(a)<<10|uint32(n)<<5|uint32(d), fmt.Sprintf("fmadd s%d, s%d, s%d, s%d", d, n, m, a))
+}
+func (f *faEmitter) fmovSzr(d int) { f.e.word(0x1E2703E0|uint32(d), fmt.Sprintf("fmov s%d, wzr", d)) }
+func (f *faEmitter) fmovS1(d int)  { f.e.word(0x1E2E1000|uint32(d), fmt.Sprintf("fmov s%d, #1.0", d)) }
+func (f *faEmitter) dupS0(d, n int) {
+	f.e.word(0x4E040400|uint32(n)<<5|uint32(d), fmt.Sprintf("dup v%d.4s, v%d.s[0]", d, n))
+}
+func (f *faEmitter) fcvtl(d, n int) {
+	f.e.word(0x0E217800|uint32(n)<<5|uint32(d), fmt.Sprintf("fcvtl v%d.4s, v%d.4h", d, n))
+}
+func (f *faEmitter) fcvtl2(d, n int) {
+	f.e.word(0x4E217800|uint32(n)<<5|uint32(d), fmt.Sprintf("fcvtl2 v%d.4s, v%d.8h", d, n))
+}
+func (f *faEmitter) ldrHPost(rt, rn int) {
+	f.e.word(0x7C402400|uint32(rn)<<5|uint32(rt), fmt.Sprintf("ldr h%d, [x%d], #2", rt, rn))
+}
+func (f *faEmitter) fcvtSH(d, n int) {
+	f.e.word(0x1EE24000|uint32(n)<<5|uint32(d), fmt.Sprintf("fcvt s%d, h%d", d, n))
+}
+func (f *faEmitter) fmulLane(d, n, m, idx int) {
+	f.e.word(0x4F809000|idxLH(idx)|lane3(d, n, m), fmt.Sprintf("fmul v%d.4s, v%d.4s, v%d.s[%d]", d, n, m, idx))
+}
+func (f *faEmitter) strS(t, n, off int) {
+	f.e.word(0xBD000000|uint32(off/4)<<10|uint32(n)<<5|uint32(t), fmt.Sprintf("str s%d, [x%d, #%d]", t, n, off))
+}
+func (f *faEmitter) ldrS(t, n, off int) {
+	f.e.word(0xBD400000|uint32(off/4)<<10|uint32(n)<<5|uint32(t), fmt.Sprintf("ldr s%d, [x%d, #%d]", t, n, off))
+}
+
+// a64FlashAttnKernel emits the NEON body under sym: the shared prologue,
+// the per-position loop, the state store.
 func a64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	var sb strings.Builder
-	e := &a64VecExp{}
-	e.w = func(format string, args ...any) { fmt.Fprintf(&sb, format+"\n", args...) }
-	e.word = func(enc uint32, dis string) { e.w("\tWORD $0x%08x // %s", enc, dis) }
-	q := newA64Q(&sb)
-	w := e.w
+	f := newFAEmitter(&sb)
 	cSym := pool.addBlob(vecExpConsts())
+	f.prologue(sym, wide)
+	f.e.loadConsts(cSym, 13)
+	f.perPositionLoop()
+	f.epilogue()
+	return sb.String()
+}
+
+// prologue loads the args struct into the register set every body uses
+// (R1 DK, R2 DV, R3 Q, R4 K row, R5 nbk1, R6 V row, R7 nbv1, R8 mask,
+// R9 positions, R10 SM, R11 VKQ; v12 S, v13 M, v14 scale, v15 slope,
+// v16 -inf), checks bounds and branches to fadone on an empty range.
+// The exp constants are the caller's to load. R22/R23 flag an 8-wide
+// tail of DK/DV, R1/R2 count 16-wide chunks.
+func (f *faEmitter) prologue(sym string, wide bool) {
+	e, w := f.e, f.w
 	args, _ := flashAttnArgs(wide)
 	movPtr := "MOVWU"
 	if wide {
 		movPtr = "MOVD"
 	}
-	ldrQPost := func(rt, rn int) { // ldr q<rt>, [x<rn>], #16
-		e.word(0x3CC10400|uint32(rn)<<5|uint32(rt), fmt.Sprintf("ldr q%d, [x%d], #16", rt, rn))
-	}
-	ldrQ := func(rt, rn, off int) { // ldr q<rt>, [x<rn>, #off] (off multiple of 16)
-		e.word(0x3DC00000|uint32(off/16)<<10|uint32(rn)<<5|uint32(rt), fmt.Sprintf("ldr q%d, [x%d, #%d]", rt, rn, off))
-	}
-	strQ := func(rt, rn, off int) {
-		e.word(0x3D800000|uint32(off/16)<<10|uint32(rn)<<5|uint32(rt), fmt.Sprintf("str q%d, [x%d, #%d]", rt, rn, off))
-	}
-	fcmpS := func(n, m int) { e.word(0x1E202000|uint32(m)<<16|uint32(n)<<5, fmt.Sprintf("fcmp s%d, s%d", n, m)) }
-	fsubS := func(d, n, m int) { e.word(0x1E203800|lane3(d, n, m), fmt.Sprintf("fsub s%d, s%d, s%d", d, n, m)) }
-	fmulS := func(d, n, m int) { e.word(0x1E200800|lane3(d, n, m), fmt.Sprintf("fmul s%d, s%d, s%d", d, n, m)) }
-	fmaddS := func(d, n, m, a int) {
-		e.word(0x1F000000|uint32(m)<<16|uint32(a)<<10|uint32(n)<<5|uint32(d), fmt.Sprintf("fmadd s%d, s%d, s%d, s%d", d, n, m, a))
-	}
-	fmovSzr := func(d int) { e.word(0x1E2703E0|uint32(d), fmt.Sprintf("fmov s%d, wzr", d)) }
-	fmovS1 := func(d int) { e.word(0x1E2E1000|uint32(d), fmt.Sprintf("fmov s%d, #1.0", d)) }
-	fnegS := func(d, n int) { e.word(0x1E214000|uint32(n)<<5|uint32(d), fmt.Sprintf("fneg s%d, s%d", d, n)) }
-	dupS0 := func(d, n int) { e.word(0x4E040400|uint32(n)<<5|uint32(d), fmt.Sprintf("dup v%d.4s, v%d.s[0]", d, n)) }
-	fcvtl := func(d, n int) { e.word(0x0E217800|uint32(n)<<5|uint32(d), fmt.Sprintf("fcvtl v%d.4s, v%d.4h", d, n)) }
-	fcvtl2 := func(d, n int) { e.word(0x4E217800|uint32(n)<<5|uint32(d), fmt.Sprintf("fcvtl2 v%d.4s, v%d.8h", d, n)) }
-	ldrHPost := func(rt, rn int) {
-		e.word(0x7C402400|uint32(rn)<<5|uint32(rt), fmt.Sprintf("ldr h%d, [x%d], #2", rt, rn))
-	}
-	fcvtSH := func(d, n int) { e.word(0x1EE24000|uint32(n)<<5|uint32(d), fmt.Sprintf("fcvt s%d, h%d", d, n)) }
-	fmulLane := func(d, n, m, idx int) {
-		e.word(0x4F809000|idxLH(idx)|lane3(d, n, m), fmt.Sprintf("fmul v%d.4s, v%d.4s, v%d.s[%d]", d, n, m, idx))
-	}
-	strS := func(t, n, off int) {
-		e.word(0xBD000000|uint32(off/4)<<10|uint32(n)<<5|uint32(t), fmt.Sprintf("str s%d, [x%d, #%d]", t, n, off))
-	}
-	ldrS := func(t, n, off int) {
-		e.word(0xBD400000|uint32(off/4)<<10|uint32(n)<<5|uint32(t), fmt.Sprintf("ldr s%d, [x%d, #%d]", t, n, off))
-	}
-
 	w("// %s: single-query flash-attention KV loop (F16 K/V, f32 VKQ), exp in registers.", sym)
 	// --- the args struct (R0 = host pointer after the range check).
 	w("\t%s\tl0+%d(FP), R0", movPtr, args["l0"])
@@ -148,8 +180,8 @@ func a64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tADD\tR20, R10, R10")
 	w("\tADD\tR20, R11, R11")
 	w("\tADD\tR20, R3, R3")
-	ldrS(12, 10, 0) // S
-	ldrS(13, 10, 4) // M
+	f.ldrS(12, 10, 0) // S
+	f.ldrS(13, 10, 4) // M
 	// positions: R9 = ic_end - ic_start; nothing to do when <= 0 (the
 	// state is stored back unchanged).
 	w("\tSUB\tR12, R9, R9")
@@ -179,8 +211,6 @@ func a64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tBLO\tfaoob")
 	w("\tADD\tR20, R8, R8")
 	w("famaskok:")
-	// --- constants and state.
-	e.loadConsts(cSym, 13)
 	// -inf: 0xff800000
 	w("\tMOVW\t$0xff800000, R27")
 	e.word(0x1E270000|uint32(27)<<5|uint32(16), "fmov s16, w27")
@@ -192,15 +222,20 @@ func a64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tANDW\t$1, R23, R23")
 	w("\tLSRW\t$4, R1, R1") // DK / 16 chunks
 	w("\tLSRW\t$4, R2, R2") // DV / 16 chunks
+}
 
+// perPositionLoop is the original algorithm: one position at a time,
+// f16 widened to f32, VKQ in memory (exp constants at v20..v31).
+func (f *faEmitter) perPositionLoop() {
+	e, q, w := f.e, f.q, f.w
 	w("fapos:")
 	// --- mask value mv (v17): slope * f16(mp[ic]); -inf skips the position.
-	fmovSzr(17)
+	f.fmovSzr(17)
 	w("\tCBZ\tR8, fadot")
-	ldrHPost(17, 8)
-	fcvtSH(17, 17)
-	fmulS(17, 17, 15)
-	fcmpS(17, 16)
+	f.ldrHPost(17, 8)
+	f.fcvtSH(17, 17)
+	f.fmulS(17, 17, 15)
+	f.fcmpS(17, 16)
 	w("\tBEQ\tfaskip")
 	w("fadot:")
 	// --- s = K.Q (f16 x f16 -> f32), R13 = K row, R14 = Q, R12 = chunks.
@@ -211,32 +246,32 @@ func a64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	e.word(0x4F000400|2, "movi v2.4s, #0")
 	w("\tCBZW\tR12, fadottail")
 	w("fadotloop:")
-	ldrQPost(3, 13)
-	ldrQPost(4, 13)
-	ldrQPost(5, 14)
-	ldrQPost(6, 14)
-	fcvtl(7, 3)
-	fcvtl2(8, 3)
-	fcvtl(9, 5)
-	fcvtl2(10, 5)
+	f.ldrQPost(3, 13)
+	f.ldrQPost(4, 13)
+	f.ldrQPost(5, 14)
+	f.ldrQPost(6, 14)
+	f.fcvtl(7, 3)
+	f.fcvtl2(8, 3)
+	f.fcvtl(9, 5)
+	f.fcvtl2(10, 5)
 	e.fmlaV(1, 7, 9)
 	e.fmlaV(2, 8, 10)
-	fcvtl(7, 4)
-	fcvtl2(8, 4)
-	fcvtl(9, 6)
-	fcvtl2(10, 6)
+	f.fcvtl(7, 4)
+	f.fcvtl2(8, 4)
+	f.fcvtl(9, 6)
+	f.fcvtl2(10, 6)
 	e.fmlaV(1, 7, 9)
 	e.fmlaV(2, 8, 10)
 	w("\tSUBW\t$1, R12, R12")
 	w("\tCBNZW\tR12, fadotloop")
 	w("fadottail:")
 	w("\tCBZW\tR22, fadotdone")
-	ldrQ(3, 13, 0)
-	ldrQ(5, 14, 0)
-	fcvtl(7, 3)
-	fcvtl2(8, 3)
-	fcvtl(9, 5)
-	fcvtl2(10, 5)
+	f.ldrQ(3, 13, 0)
+	f.ldrQ(5, 14, 0)
+	f.fcvtl(7, 3)
+	f.fcvtl2(8, 3)
+	f.fcvtl(9, 5)
+	f.fcvtl2(10, 5)
 	e.fmlaV(1, 7, 9)
 	e.fmlaV(2, 8, 10)
 	w("fadotdone:")
@@ -244,52 +279,52 @@ func a64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	q.faddp4s(1, 1, 1)
 	q.faddpS(1, 1)
 	// s = s*scale + mv
-	fmaddS(1, 1, 14, 17)
+	f.fmaddS(1, 1, 14, 17)
 	// --- online softmax: ms (v18), vs (v19).
-	fcmpS(1, 13)
+	f.fcmpS(1, 13)
 	w("\tBGT\tfanewmax")
 	// vs = exp(s - M); ms = 1
-	fsubS(0, 1, 13)
-	dupS0(0, 0)
+	f.fsubS(0, 1, 13)
+	f.dupS0(0, 0)
 	e.exp(0, 0)
 	w("\tFMOVS\tF0, F19")
-	fmovS1(18)
+	f.fmovS1(18)
 	w("\tB\tfamad")
 	w("fanewmax:")
 	// ms = exp(Mold - s); M = s; VKQ *= ms; vs = 1
-	fsubS(0, 13, 1)
+	f.fsubS(0, 13, 1)
 	w("\tFMOVS\tF1, F13") // M = s (v1 is exp scratch)
-	dupS0(0, 0)
+	f.dupS0(0, 0)
 	e.exp(0, 0)
 	w("\tFMOVS\tF0, F18")
-	fmovS1(19)
+	f.fmovS1(19)
 	w("\tMOVD\tR11, R14")
 	w("\tMOVW\tR2, R12")
 	w("\tCBZW\tR12, fascaletail")
 	w("fascale:")
-	ldrQ(3, 14, 0)
-	ldrQ(4, 14, 16)
-	ldrQ(5, 14, 32)
-	ldrQ(6, 14, 48)
-	fmulLane(3, 3, 18, 0)
-	fmulLane(4, 4, 18, 0)
-	fmulLane(5, 5, 18, 0)
-	fmulLane(6, 6, 18, 0)
-	strQ(3, 14, 0)
-	strQ(4, 14, 16)
-	strQ(5, 14, 32)
-	strQ(6, 14, 48)
+	f.ldrQ(3, 14, 0)
+	f.ldrQ(4, 14, 16)
+	f.ldrQ(5, 14, 32)
+	f.ldrQ(6, 14, 48)
+	f.fmulLane(3, 3, 18, 0)
+	f.fmulLane(4, 4, 18, 0)
+	f.fmulLane(5, 5, 18, 0)
+	f.fmulLane(6, 6, 18, 0)
+	f.strQ(3, 14, 0)
+	f.strQ(4, 14, 16)
+	f.strQ(5, 14, 32)
+	f.strQ(6, 14, 48)
 	w("\tADD\t$64, R14, R14")
 	w("\tSUBW\t$1, R12, R12")
 	w("\tCBNZW\tR12, fascale")
 	w("fascaletail:")
 	w("\tCBZW\tR23, famad")
-	ldrQ(3, 14, 0)
-	ldrQ(4, 14, 16)
-	fmulLane(3, 3, 18, 0)
-	fmulLane(4, 4, 18, 0)
-	strQ(3, 14, 0)
-	strQ(4, 14, 16)
+	f.ldrQ(3, 14, 0)
+	f.ldrQ(4, 14, 16)
+	f.fmulLane(3, 3, 18, 0)
+	f.fmulLane(4, 4, 18, 0)
+	f.strQ(3, 14, 0)
+	f.strQ(4, 14, 16)
 	w("famad:")
 	// --- VKQ += vs * V (f16 -> f32), R13 = V row, R14 = VKQ, R12 = chunks.
 	w("\tMOVD\tR6, R13")
@@ -297,52 +332,55 @@ func a64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tMOVW\tR2, R12")
 	w("\tCBZW\tR12, famadtail")
 	w("famadloop:")
-	ldrQPost(3, 13)
-	ldrQPost(4, 13)
-	fcvtl(5, 3)
-	fcvtl2(6, 3)
-	fcvtl(7, 4)
-	fcvtl2(8, 4)
-	ldrQ(9, 14, 0)
-	ldrQ(10, 14, 16)
-	ldrQ(11, 14, 32)
-	ldrQ(0, 14, 48)
+	f.ldrQPost(3, 13)
+	f.ldrQPost(4, 13)
+	f.fcvtl(5, 3)
+	f.fcvtl2(6, 3)
+	f.fcvtl(7, 4)
+	f.fcvtl2(8, 4)
+	f.ldrQ(9, 14, 0)
+	f.ldrQ(10, 14, 16)
+	f.ldrQ(11, 14, 32)
+	f.ldrQ(0, 14, 48)
 	e.fmlaLane(9, 5, 19, 0)
 	e.fmlaLane(10, 6, 19, 0)
 	e.fmlaLane(11, 7, 19, 0)
 	e.fmlaLane(0, 8, 19, 0)
-	strQ(9, 14, 0)
-	strQ(10, 14, 16)
-	strQ(11, 14, 32)
-	strQ(0, 14, 48)
+	f.strQ(9, 14, 0)
+	f.strQ(10, 14, 16)
+	f.strQ(11, 14, 32)
+	f.strQ(0, 14, 48)
 	w("\tADD\t$64, R14, R14")
 	w("\tSUBW\t$1, R12, R12")
 	w("\tCBNZW\tR12, famadloop")
 	w("famadtail:")
 	w("\tCBZW\tR23, famaddone")
-	ldrQ(3, 13, 0)
-	fcvtl(5, 3)
-	fcvtl2(6, 3)
-	ldrQ(9, 14, 0)
-	ldrQ(10, 14, 16)
+	f.ldrQ(3, 13, 0)
+	f.fcvtl(5, 3)
+	f.fcvtl2(6, 3)
+	f.ldrQ(9, 14, 0)
+	f.ldrQ(10, 14, 16)
 	e.fmlaLane(9, 5, 19, 0)
 	e.fmlaLane(10, 6, 19, 0)
-	strQ(9, 14, 0)
-	strQ(10, 14, 16)
+	f.strQ(9, 14, 0)
+	f.strQ(10, 14, 16)
 	w("famaddone:")
 	// S = S*ms + vs
-	fmaddS(12, 12, 18, 19)
+	f.fmaddS(12, 12, 18, 19)
 	w("faskip:")
 	w("\tADD\tR4, R5, R4")
 	w("\tADD\tR6, R7, R6")
 	w("\tSUB\t$1, R9, R9")
 	w("\tCBNZ\tR9, fapos")
+}
+
+// epilogue stores S and M back and traps on out-of-bounds.
+func (f *faEmitter) epilogue() {
+	w := f.w
 	w("fadone:")
-	strS(12, 10, 0)
-	strS(13, 10, 4)
+	f.strS(12, 10, 0)
+	f.strS(13, 10, 4)
 	w("\tRET")
 	w("faoob:")
 	w("\tB\tovr_oob")
-	_ = fnegS
-	return sb.String()
 }

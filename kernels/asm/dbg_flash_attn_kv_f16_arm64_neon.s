@@ -57,6 +57,14 @@
 	BLO	faoob
 	ADD	R20, R8, R8
 famaskok:
+	MOVW	$0xff800000, R27
+	WORD $0x1e270370 // fmov s16, w27
+	LSRW	$3, R1, R22
+	ANDW	$1, R22, R22
+	LSRW	$3, R2, R23
+	ANDW	$1, R23, R23
+	LSRW	$4, R1, R1
+	LSRW	$4, R2, R2
 	MOVD	$·ovr_dbg_flash_attn_kv_f16_neon_b64_0000404b3baab83f0072313f8ebebf351020073c179f2b3d33af2a3edbfeff3ef6ff7f3f0000fc42000040430000803f000000820000007fffffff7f00000000(SB), R13
 	VLD1	(R13), [V28.S4, V29.S4, V30.S4, V31.S4]
 	WORD $0x4e0c07db // dup v27.4s, v30.s[1]
@@ -67,14 +75,6 @@ famaskok:
 	WORD $0x4e040796 // dup v22.4s, v28.s[0]
 	WORD $0x4e0c07b5 // dup v21.4s, v29.s[1]
 	WORD $0x4e1c07b4 // dup v20.4s, v29.s[3]
-	MOVW	$0xff800000, R27
-	WORD $0x1e270370 // fmov s16, w27
-	LSRW	$3, R1, R22
-	ANDW	$1, R22, R22
-	LSRW	$3, R2, R23
-	ANDW	$1, R23, R23
-	LSRW	$4, R1, R1
-	LSRW	$4, R2, R2
 fapos:
 	WORD $0x1e2703f1 // fmov s17, wzr
 	CBZ	R8, fadot
