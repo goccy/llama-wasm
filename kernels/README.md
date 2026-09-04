@@ -40,9 +40,11 @@ would retire the addition.
 | `dbg_vec_swiglu_f32` | SwiGLU row | arm64 neon, amd64 avx2 | same as soft_max |
 | `dbg_vec_dot_f16` | f16 dot (single-query attention K·Q) | arm64 neon, amd64 avx2 | lower the f16-table gather to FCVTL/VCVTPH2PS + FMA |
 | `dbg_vec_mad_f16_f32` | f16-by-f32 multiply-add (attention V accumulate) | arm64 neon, amd64 avx2 | same as `dbg_vec_dot_f16` |
-| `dbg_vec_dot_q5_0_q8_0` | q5_0 x q8_0 dot (the matmul of tensors K-quants cannot cover, e.g. Qwen2.5-0.5B's 896-wide rows) | arm64 dotprod | lower the fifth-bit gather + i16 dot pairs to CMTST/SDOT |
-| `dbg_vec_dot_q4_K_q8_K` | q4_K x q8_K dot (Q4_K_M matmul) | arm64 dotprod | lower the packed 6-bit scale unpack and the nibble dot pairs to SDOT with by-element scaling |
-| `dbg_vec_dot_q6_K_q8_K` | q6_K x q8_K dot (Q4_K_M's q6_K tensors) | arm64 dotprod | same as `dbg_vec_dot_q4_K_q8_K` |
+| `dbg_gemv_q4_K_8x8` | q4_K_8x8 repack GEMV (Q4_K decode matmul, rows a multiple of 8) | arm64 dotprod, amd64 avx2 | lower the 8-row nibble dot to SDOT/VPMADDUBSW with the 6-bit scales decoded once per block |
+| `dbg_gemm_q4_K_8x8` | q4_K_8x8 x q8_Kx4 repack GEMM (Q4_K prompt matmul) | arm64 i8mm, amd64 avx2 | register-blocked 8x4 int8 tile (SMMLA / VPMADDUBSW) with the block sums folded in as a bias |
+| `dbg_vec_dot_q5_0_q8_0` | q5_0 x q8_0 dot (the matmul of tensors K-quants cannot cover, e.g. Qwen2.5-0.5B's 896-wide rows) | arm64 dotprod, amd64 avx2 | lower the fifth-bit gather + i16 dot pairs to CMTST/SDOT |
+| `dbg_vec_dot_q4_K_q8_K` | q4_K x q8_K dot (Q4_K_M matmul, rows not a multiple of 8) | arm64 dotprod, amd64 avx2 | lower the packed 6-bit scale unpack and the nibble dot pairs to SDOT with by-element scaling |
+| `dbg_vec_dot_q6_K_q8_K` | q6_K x q8_K dot (Q4_K_M's q6_K tensors) | arm64 dotprod, amd64 avx2 | same as `dbg_vec_dot_q4_K_q8_K` |
 | `dbg_flash_attn_kv_f16` | single-query flash-attention KV loop (F16 K/V: K.Q dot, online softmax, V accumulate) | arm64 neon | keep the per-position loop in registers (no per-position calls, an inline expf) |
 
 ## Layout

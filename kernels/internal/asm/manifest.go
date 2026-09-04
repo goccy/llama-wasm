@@ -108,6 +108,22 @@ func Overrides() *Manifest {
 				},
 			},
 			{
+				Export: "dbg_gemv_q4_K_8x8",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i32", "i32"},
+				Bodies: []Body{
+					body("dbg_gemv_q4_K_8x8", "arm64", "dotprod", 16, func(sym string, _ *ConstPool) string { return a64GemvQ4K8x8Kernel(sym, wide) }),
+					body("dbg_gemv_q4_K_8x8", "amd64", "avx2", x64Q4KFrame, func(sym string, p *ConstPool) string { return x64GemvQ4K8x8Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_gemm_q4_K_8x8",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i32", "i32"},
+				Bodies: []Body{
+					body("dbg_gemm_q4_K_8x8", "arm64", "i8mm", a64GemmQ4KFrame, func(sym string, _ *ConstPool) string { return a64GemmQ4K8x8Kernel(sym, wide) }),
+					body("dbg_gemm_q4_K_8x8", "amd64", "avx2", x64Q4KFrame, func(sym string, p *ConstPool) string { return x64GemmQ4K8x8Kernel(sym, p, wide) }),
+				},
+			},
+			{
 				Export: "dbg_vec_dot_q5_0_q8_0",
 				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
 				Bodies: []Body{

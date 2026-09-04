@@ -69,6 +69,11 @@ var registry = map[string]verification{
 	"wasm-flash-attn-kv-loop-export.patch": {
 		verify: hasExports("dbg_flash_attn_kv_f16"),
 	},
+	// The Q4_K 8x8 repack GEMV/GEMM exports (applied after the q8_0 repack
+	// patch that creates arch/wasm/repack.cpp).
+	"wasm-q8-repack-q4k-kernels.patch": {
+		verify: hasExports("dbg_gemv_q4_K_8x8", "dbg_gemm_q4_K_8x8"),
+	},
 }
 
 // hasExports checks that every name appears in the module's export
