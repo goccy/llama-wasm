@@ -291,3 +291,13 @@ func TestA64FlashAttnKernelGate(t *testing.T) {
 	writeRunTree(t, dir, "attnrun", "arm64", asm, flashAttnRunSrc+flashAttnDecls, flashAttnRunTest)
 	runArm64Gate(t, dir, ".", "TestFlashAttn", asm)
 }
+
+func TestX64FlashAttnKernelGate(t *testing.T) {
+	_, argBytes := flashAttnArgs(true)
+	pool := NewConstPool("fa_")
+	body := x64FlashAttnKernel("AttnKernel", pool, true) + "\n" + pool.Emit()
+	asm := wrap("amd64", "AttnKernel", x64FAFrame, argBytes, "avx2", body)
+	dir := t.TempDir()
+	writeRunTree(t, dir, "attnrun", "amd64", asm, flashAttnRunSrc+flashAttnDecls, flashAttnRunTest)
+	runAmd64Gate(t, dir, ".", "TestFlashAttn", asm)
+}

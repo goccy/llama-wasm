@@ -105,6 +105,7 @@ func Overrides() *Manifest {
 				Params: []string{"i64"},
 				Bodies: []Body{
 					body("dbg_flash_attn_kv_f16", "arm64", "neon", 16, func(sym string, p *ConstPool) string { return a64FlashAttnKernel(sym, p, wide) }),
+					body("dbg_flash_attn_kv_f16", "amd64", "avx2", x64FAFrame, func(sym string, p *ConstPool) string { return x64FlashAttnKernel(sym, p, wide) }),
 				},
 			},
 			{

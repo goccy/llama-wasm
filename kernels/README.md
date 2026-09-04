@@ -45,7 +45,7 @@ would retire the addition.
 | `dbg_vec_dot_q5_0_q8_0` | q5_0 x q8_0 dot (the matmul of tensors K-quants cannot cover, e.g. Qwen2.5-0.5B's 896-wide rows) | arm64 dotprod, amd64 avx2 | lower the fifth-bit gather + i16 dot pairs to CMTST/SDOT |
 | `dbg_vec_dot_q4_K_q8_K` | q4_K x q8_K dot (Q4_K_M matmul, rows not a multiple of 8) | arm64 dotprod, amd64 avx2 | lower the packed 6-bit scale unpack and the nibble dot pairs to SDOT with by-element scaling |
 | `dbg_vec_dot_q6_K_q8_K` | q6_K x q8_K dot (Q4_K_M's q6_K tensors) | arm64 dotprod, amd64 avx2 | same as `dbg_vec_dot_q4_K_q8_K` |
-| `dbg_flash_attn_kv_f16` | single-query flash-attention KV loop (F16 K/V: K.Q dot, online softmax, V accumulate) | arm64 neon | keep the per-position loop in registers (no per-position calls, an inline expf) |
+| `dbg_flash_attn_kv_f16` | single-query flash-attention KV loop (F16 K/V: K.Q dot, online softmax, V accumulate) | arm64 neon, amd64 avx2 | keep the per-position loop in registers (no per-position calls, an inline expf) |
 
 ## Layout
 
