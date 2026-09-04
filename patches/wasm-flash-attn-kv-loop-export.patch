@@ -81,7 +81,7 @@
 +        // The exported KV loop covers the F16 K/V, no-softcap case; it
 +        // consumes the whole range, so the loop below is left empty.
 +        int64_t ic_loop_start = ic_start;
-+        if (k->type == GGML_TYPE_F16 && v->type == GGML_TYPE_F16 && logit_softcap == 0.0f) {
++        if (k->type == GGML_TYPE_F16 && v->type == GGML_TYPE_F16 && logit_softcap == 0.0f && DK % 8 == 0 && DV % 8 == 0) {
 +            float SM[2] = { S, M };
 +            struct ggml_flash_attn_kv_f16_args a = {
 +                /* Q_q */ Q_q,

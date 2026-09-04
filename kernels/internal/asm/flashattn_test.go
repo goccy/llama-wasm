@@ -210,7 +210,9 @@ func runAttn(t *testing.T, kernel attnKernel, DK, DV, n, start, pad int, withMas
 	if got := get32(mem, smOff); !close64(got, S, 2e-5) {
 		t.Fatalf("%s: S = %v, want %v", desc, got, S)
 	}
-	if got := get32(mem, smOff+4); !close64(got, M, 1e-6) {
+	// M is one f32 score (an f32 dot of DK terms, fused with the scale):
+	// a few ulps of the score magnitude.
+	if got := get32(mem, smOff+4); math.Abs(float64(got)-M) > 1e-5*math.Max(1, math.Abs(M)) {
 		t.Fatalf("%s: M = %v, want %v", desc, got, M)
 	}
 	// VKQ sums n terms of magnitude up to vs*|v| <= 1 in f32 (the wasm
@@ -258,7 +260,7 @@ import "testing"
 
 func TestFlashAttn(t *testing.T) {
 	seed := uint32(7)
-	for _, d := range [][2]int{{64, 64}, {128, 128}, {16, 32}, {80, 64}} {
+	for _, d := range [][2]int{{64, 64}, {128, 128}, {16, 32}, {80, 64}, {8, 8}, {24, 40}, {72, 8}} {
 		for _, n := range []int{1, 2, 5, 64, 301} {
 			for _, start := range []int{0, 3} {
 				if start >= n {

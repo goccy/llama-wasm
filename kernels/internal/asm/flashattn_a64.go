@@ -26,7 +26,7 @@ import (
 // signatures wasm2go lowers to asm (a 14-argument signature falls back
 // to Go and loses its override).
 //
-// DK and DV must be multiples of 16 (the head sizes llama.cpp ships);
+// DK and DV must be multiples of 8 (every head size llama.cpp ships);
 // the C dispatcher only calls the export for F16 K/V without a logit
 // softcap. mp may be null. SM[0] = S, SM[1] = M are read and written.
 
@@ -184,6 +184,12 @@ func a64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	// -inf: 0xff800000
 	w("\tMOVW\t$0xff800000, R27")
 	e.word(0x1E270000|uint32(27)<<5|uint32(16), "fmov s16, w27")
+	// DK, DV are multiples of 8: R1/R2 count 16-wide chunks, R22/R23
+	// flag a trailing 8-wide half chunk.
+	w("\tLSRW\t$3, R1, R22")
+	w("\tANDW\t$1, R22, R22")
+	w("\tLSRW\t$3, R2, R23")
+	w("\tANDW\t$1, R23, R23")
 	w("\tLSRW\t$4, R1, R1") // DK / 16 chunks
 	w("\tLSRW\t$4, R2, R2") // DV / 16 chunks
 
@@ -203,6 +209,7 @@ func a64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tMOVW\tR1, R12")
 	e.word(0x4F000400|1, "movi v1.4s, #0")
 	e.word(0x4F000400|2, "movi v2.4s, #0")
+	w("\tCBZW\tR12, fadottail")
 	w("fadotloop:")
 	ldrQPost(3, 13)
 	ldrQPost(4, 13)
@@ -222,6 +229,17 @@ func a64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	e.fmlaV(2, 8, 10)
 	w("\tSUBW\t$1, R12, R12")
 	w("\tCBNZW\tR12, fadotloop")
+	w("fadottail:")
+	w("\tCBZW\tR22, fadotdone")
+	ldrQ(3, 13, 0)
+	ldrQ(5, 14, 0)
+	fcvtl(7, 3)
+	fcvtl2(8, 3)
+	fcvtl(9, 5)
+	fcvtl2(10, 5)
+	e.fmlaV(1, 7, 9)
+	e.fmlaV(2, 8, 10)
+	w("fadotdone:")
 	e.faddV(1, 1, 2)
 	q.faddp4s(1, 1, 1)
 	q.faddpS(1, 1)
@@ -247,6 +265,7 @@ func a64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	fmovS1(19)
 	w("\tMOVD\tR11, R14")
 	w("\tMOVW\tR2, R12")
+	w("\tCBZW\tR12, fascaletail")
 	w("fascale:")
 	ldrQ(3, 14, 0)
 	ldrQ(4, 14, 16)
@@ -263,11 +282,20 @@ func a64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tADD\t$64, R14, R14")
 	w("\tSUBW\t$1, R12, R12")
 	w("\tCBNZW\tR12, fascale")
+	w("fascaletail:")
+	w("\tCBZW\tR23, famad")
+	ldrQ(3, 14, 0)
+	ldrQ(4, 14, 16)
+	fmulLane(3, 3, 18, 0)
+	fmulLane(4, 4, 18, 0)
+	strQ(3, 14, 0)
+	strQ(4, 14, 16)
 	w("famad:")
 	// --- VKQ += vs * V (f16 -> f32), R13 = V row, R14 = VKQ, R12 = chunks.
 	w("\tMOVD\tR6, R13")
 	w("\tMOVD\tR11, R14")
 	w("\tMOVW\tR2, R12")
+	w("\tCBZW\tR12, famadtail")
 	w("famadloop:")
 	ldrQPost(3, 13)
 	ldrQPost(4, 13)
@@ -290,6 +318,18 @@ func a64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tADD\t$64, R14, R14")
 	w("\tSUBW\t$1, R12, R12")
 	w("\tCBNZW\tR12, famadloop")
+	w("famadtail:")
+	w("\tCBZW\tR23, famaddone")
+	ldrQ(3, 13, 0)
+	fcvtl(5, 3)
+	fcvtl2(6, 3)
+	ldrQ(9, 14, 0)
+	ldrQ(10, 14, 16)
+	e.fmlaLane(9, 5, 19, 0)
+	e.fmlaLane(10, 6, 19, 0)
+	strQ(9, 14, 0)
+	strQ(10, 14, 16)
+	w("famaddone:")
 	// S = S*ms + vs
 	fmaddS(12, 12, 18, 19)
 	w("faskip:")

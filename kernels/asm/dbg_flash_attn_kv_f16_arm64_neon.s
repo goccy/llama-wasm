@@ -69,6 +69,10 @@ famaskok:
 	WORD $0x4e1c07b4 // dup v20.4s, v29.s[3]
 	MOVW	$0xff800000, R27
 	WORD $0x1e270370 // fmov s16, w27
+	LSRW	$3, R1, R22
+	ANDW	$1, R22, R22
+	LSRW	$3, R2, R23
+	ANDW	$1, R23, R23
 	LSRW	$4, R1, R1
 	LSRW	$4, R2, R2
 fapos:
@@ -85,6 +89,7 @@ fadot:
 	MOVW	R1, R12
 	WORD $0x4f000401 // movi v1.4s, #0
 	WORD $0x4f000402 // movi v2.4s, #0
+	CBZW	R12, fadottail
 fadotloop:
 	WORD $0x3cc105a3 // ldr q3, [x13], #16
 	WORD $0x3cc105a4 // ldr q4, [x13], #16
@@ -104,6 +109,17 @@ fadotloop:
 	WORD $0x4e2acd02 // fmla v2.4s, v8.4s, v10.4s
 	SUBW	$1, R12, R12
 	CBNZW	R12, fadotloop
+fadottail:
+	CBZW	R22, fadotdone
+	WORD $0x3dc001a3 // ldr q3, [x13, #0]
+	WORD $0x3dc001c5 // ldr q5, [x14, #0]
+	WORD $0x0e217867 // fcvtl v7.4s, v3.4h
+	WORD $0x4e217868 // fcvtl2 v8.4s, v3.8h
+	WORD $0x0e2178a9 // fcvtl v9.4s, v5.4h
+	WORD $0x4e2178aa // fcvtl2 v10.4s, v5.8h
+	WORD $0x4e29cce1 // fmla v1.4s, v7.4s, v9.4s
+	WORD $0x4e2acd02 // fmla v2.4s, v8.4s, v10.4s
+fadotdone:
 	WORD $0x4e22d421 // fadd v1.4s, v1.4s, v2.4s
 	WORD $0x6e21d421 // faddp v1.4s, v1.4s, v1.4s
 	WORD $0x7e30d821 // faddp s1, v1.2s
@@ -187,6 +203,7 @@ fanewmax:
 	WORD $0x1e2e1013 // fmov s19, #1.0
 	MOVD	R11, R14
 	MOVW	R2, R12
+	CBZW	R12, fascaletail
 fascale:
 	WORD $0x3dc001c3 // ldr q3, [x14, #0]
 	WORD $0x3dc005c4 // ldr q4, [x14, #16]
@@ -203,10 +220,19 @@ fascale:
 	ADD	$64, R14, R14
 	SUBW	$1, R12, R12
 	CBNZW	R12, fascale
+fascaletail:
+	CBZW	R23, famad
+	WORD $0x3dc001c3 // ldr q3, [x14, #0]
+	WORD $0x3dc005c4 // ldr q4, [x14, #16]
+	WORD $0x4f929063 // fmul v3.4s, v3.4s, v18.s[0]
+	WORD $0x4f929084 // fmul v4.4s, v4.4s, v18.s[0]
+	WORD $0x3d8001c3 // str q3, [x14, #0]
+	WORD $0x3d8005c4 // str q4, [x14, #16]
 famad:
 	MOVD	R6, R13
 	MOVD	R11, R14
 	MOVW	R2, R12
+	CBZW	R12, famadtail
 famadloop:
 	WORD $0x3cc105a3 // ldr q3, [x13], #16
 	WORD $0x3cc105a4 // ldr q4, [x13], #16
@@ -229,6 +255,18 @@ famadloop:
 	ADD	$64, R14, R14
 	SUBW	$1, R12, R12
 	CBNZW	R12, famadloop
+famadtail:
+	CBZW	R23, famaddone
+	WORD $0x3dc001a3 // ldr q3, [x13, #0]
+	WORD $0x0e217865 // fcvtl v5.4s, v3.4h
+	WORD $0x4e217866 // fcvtl2 v6.4s, v3.8h
+	WORD $0x3dc001c9 // ldr q9, [x14, #0]
+	WORD $0x3dc005ca // ldr q10, [x14, #16]
+	WORD $0x4f9310a9 // fmla v9.4s, v5.4s, v19.s[0]
+	WORD $0x4f9310ca // fmla v10.4s, v6.4s, v19.s[0]
+	WORD $0x3d8001c9 // str q9, [x14, #0]
+	WORD $0x3d8005ca // str q10, [x14, #16]
+famaddone:
 	WORD $0x1f124d8c // fmadd s12, s12, s18, s19
 faskip:
 	ADD	R4, R5, R4
