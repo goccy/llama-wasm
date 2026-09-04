@@ -192,7 +192,7 @@
         {
           "arch": "amd64",
           "feature": "avx2",
-          "frame": 40,
+          "frame": 96,
           "file": "dbg_flash_attn_kv_f16_amd64_avx2.s"
         }
       ]

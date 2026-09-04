@@ -5,55 +5,79 @@ import (
 	"strings"
 )
 
-// x64FlashAttnKernel: the AVX2 twin of a64FlashAttnKernel (same args
-// struct, same arithmetic: f32 K.Q via VCVTPH2PS + FMA, the online
-// softmax with the polynomial expf of the soft_max kernel, the F16 V
-// accumulate into the f32 VKQ row). FastMath only.
+// x64FlashAttnKernel: the AVX2 body of the single-query flash-attention
+// KV loop (same args struct and arithmetic contract as the arm64 bodies;
+// f32 accumulation like the NEON one). Positions go in blocks of eight:
 //
-// Registers: SI K row (advancing), DI V row (advancing), R8 nbk1, R9
-// nbv1, R10 mask element (advancing, 0 when no mask), R11 positions
-// left, R12 SM, R13 VKQ32, BX Q_q; AX/CX/DX loop scratch. X12 S, X13 M,
-// Y14 vs, Y15 ms (broadcast); Y0..Y11 scratch (the exp routine
-// clobbers X1..X11). The frame keeps what does not fit: DK, DV, the
-// 16-wide chunk counts and 8-wide tail flags, scale, slope and mv.
+//   - K.Q per position is VCVTPH2PS + FMA over eight-element chunks
+//     (f16 K and Q widened as they stream, no residency needed);
+//   - the block's eight scores take one vectorized exp instead of one
+//     per position; masked (-inf) positions and the lanes past the
+//     block end flush through exp(-200) = 0;
+//   - VKQ (the caller's f32 buffer) accumulates chunk by chunk: each
+//     32-byte chunk is loaded once, receives the block's eight positions
+//     (p_i broadcast in Y0..Y7, V_i widened on the fly) and is stored
+//     once.
+//
+// DK and DV are multiples of 8. FastMath only.
+//
+// Registers: SI K row (block start), DI V row (block start), R8 nbk1,
+// R9 nbv1, R10 mask element (0 without a mask), R11 positions left, R12
+// SM, R13 VKQ32, BX Q_q; AX/CX/DX scratch. X12 S, X13 M; Y14/Y15
+// scratch outside the exp routine's Y1..Y11; Y0..Y7 the block's weights
+// during the V accumulate. Frame: 0 scores (8 f32) | 32 weights (8
+// f32) | 64 DK | 68 DV | 72 DK/8 | 76 DV/8 | 80 scale | 84 slope | 88
+// block size | 92 chunk counter.
 const (
-	x64faDK    = 0
-	x64faDV    = 4
-	x64faDK16  = 8
-	x64faDK8   = 12
-	x64faDV16  = 16
-	x64faDV8   = 20
-	x64faScale = 24
-	x64faSlope = 28
-	x64faMv    = 32
-	x64FAFrame = 40
+	x64faScores = 0
+	x64faP      = 32
+	x64faDK     = 64
+	x64faDV     = 68
+	x64faDK8    = 72
+	x64faDV8    = 76
+	x64faScale  = 80
+	x64faSlope  = 84
+	x64faNblk   = 88
+	x64faCnt    = 92
+	x64FAFrame  = 96
 )
 
 func x64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	var sb strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&sb, format+"\n", args...) }
 	e := newX64VecExp(w, pool)
-	negInf := "·" + pool.addBlob([]byte{0, 0, 0x80, 0xff}) + "(SB)"
+	rep := func(bits uint32) string {
+		b := make([]byte, 32)
+		for i := 0; i < 8; i++ {
+			b[4*i], b[4*i+1], b[4*i+2], b[4*i+3] = byte(bits), byte(bits>>8), byte(bits>>16), byte(bits>>24)
+		}
+		return "·" + pool.addBlob(b) + "(SB)"
+	}
+	negInf := rep(0xff800000)
+	neg200 := rep(0xc3480000)
 	args, _ := flashAttnArgs(wide)
 	movPtr := "MOVL"
 	if wide {
 		movPtr = "MOVQ"
 	}
-	w("// %s: single-query flash-attention KV loop (F16 K/V, f32 VKQ), exp in registers.", sym)
+	hmax := func() { // X0 = max of the eight lanes of Y0
+		w("\tVEXTRACTF128\t$1, Y0, X1")
+		w("\tVMAXPS\tX1, X0, X0")
+		w("\tVPERMILPS\t$0x4e, X0, X1")
+		w("\tVMAXPS\tX1, X0, X0")
+		w("\tVPERMILPS\t$0xb1, X0, X1")
+		w("\tVMAXPS\tX1, X0, X0")
+	}
+	w("// %s: single-query flash-attention KV loop (F16 K/V, f32 VKQ), blocks of eight positions, exp in registers.", sym)
 	w("\t%s\tl0+%d(FP), AX", movPtr, args["l0"])
 	w("\tLEAQ\t%d(AX), CX", faArgSize)
 	w("\tCMPQ\tR15, CX")
 	w("\tJCS\tfaoob")
 	w("\tADDQ\tR14, AX")
-	// DK, DV and their chunk counts (multiples of 8).
-	for _, d := range []struct{ arg, n, c16, c8 int }{{faArgDK, x64faDK, x64faDK16, x64faDK8}, {faArgDV, x64faDV, x64faDV16, x64faDV8}} {
+	for _, d := range []struct{ arg, n, c8 int }{{faArgDK, x64faDK, x64faDK8}, {faArgDV, x64faDV, x64faDV8}} {
 		w("\tMOVL\t%d(AX), CX", d.arg)
 		w("\tMOVL\tCX, %d(SP)", d.n)
-		w("\tMOVL\tCX, DX")
-		w("\tSHRL\t$4, DX")
-		w("\tMOVL\tDX, %d(SP)", d.c16)
 		w("\tSHRL\t$3, CX")
-		w("\tANDL\t$1, CX")
 		w("\tMOVL\tCX, %d(SP)", d.c8)
 	}
 	w("\tVMOVSS\t%d(AX), X0", faArgScale)
@@ -122,125 +146,135 @@ func x64FlashAttnKernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tVMOVSS\t(R12), X12")    // S
 	w("\tVMOVSS\t4(R12), X13")   // M
 
-	w("fapos:")
-	// --- mask value mv: slope * f16(mp[ic]); -inf skips the position.
-	w("\tVXORPS\tX0, X0, X0")
-	w("\tVMOVSS\tX0, %d(SP)", x64faMv)
-	w("\tTESTQ\tR10, R10")
-	w("\tJZ\tfadot")
-	w("\tMOVWLZX\t(R10), AX")
-	w("\tADDQ\t$2, R10")
-	w("\tVMOVD\tAX, X0")
-	w("\tVCVTPH2PS\tX0, X0")
-	w("\tVMULSS\t%d(SP), X0, X0", x64faSlope)
-	w("\tVMOVSS\tX0, %d(SP)", x64faMv)
+	w("fablk:")
+	// block size = min(8, positions left)
+	w("\tMOVL\t$8, AX")
+	w("\tCMPQ\tR11, $8")
+	w("\tJGE\tfanblk")
+	w("\tMOVL\tR11, AX")
+	w("fanblk:")
+	w("\tMOVL\tAX, %d(SP)", x64faNblk)
+	w("\tVMOVUPS\t%s, Y0", negInf)
+	w("\tVMOVUPS\tY0, %d(SP)", x64faScores)
+	// --- scores: s_i = (K_i . Q) * scale + mv_i, mv_i = slope * f16(mp[i])
+	for i := 0; i < 8; i++ {
+		if i > 0 {
+			w("\tCMPL\t%d(SP), $%d", x64faNblk, i)
+			w("\tJLE\tfascored")
+		}
+		if i == 0 {
+			w("\tMOVQ\tSI, AX")
+		} else {
+			w("\tIMUL3Q\t$%d, R8, AX", i)
+			w("\tADDQ\tSI, AX")
+		}
+		w("\tMOVQ\tBX, CX")
+		w("\tMOVL\t%d(SP), DX", x64faDK8)
+		w("\tVXORPS\tY0, Y0, Y0")
+		w("fadot%d:", i)
+		w("\tVCVTPH2PS\t(AX), Y1")
+		w("\tVCVTPH2PS\t(CX), Y2")
+		w("\tVFMADD231PS\tY2, Y1, Y0")
+		w("\tADDQ\t$16, AX")
+		w("\tADDQ\t$16, CX")
+		w("\tDECL\tDX")
+		w("\tJNZ\tfadot%d", i)
+		w("\tVEXTRACTF128\t$1, Y0, X1")
+		w("\tVADDPS\tX1, X0, X0")
+		w("\tVHADDPS\tX0, X0, X0")
+		w("\tVHADDPS\tX0, X0, X0")
+		w("\tVXORPS\tX1, X1, X1")
+		w("\tTESTQ\tR10, R10")
+		w("\tJZ\tfanomask%d", i)
+		w("\tMOVWLZX\t%d(R10), AX", 2*i)
+		w("\tVMOVD\tAX, X1")
+		w("\tVCVTPH2PS\tX1, X1")
+		w("\tVMULSS\t%d(SP), X1, X1", x64faSlope)
+		w("fanomask%d:", i)
+		w("\tVMOVSS\t%d(SP), X2", x64faScale)
+		w("\tVFMADD213SS\tX1, X2, X0") // X0 = X2*X0 + X1
+		w("\tVMOVSS\tX0, %d(SP)", x64faScores+4*i)
+	}
+	w("fascored:")
+	// --- block max; all -inf (every position masked) skips the block
+	w("\tVMOVUPS\t%d(SP), Y0", x64faScores)
+	hmax()
 	w("\tVUCOMISS\t%s, X0", negInf)
-	w("\tJP\tfadot")
-	w("\tJE\tfaskip")
-	w("fadot:")
-	// --- s = K.Q (f16 x f16 -> f32): DX = K row, AX = Q, CX = 16-wide chunks.
-	w("\tMOVQ\tSI, DX")
-	w("\tMOVQ\tBX, AX")
-	w("\tVXORPS\tY0, Y0, Y0")
-	w("\tVXORPS\tY1, Y1, Y1")
-	w("\tMOVL\t%d(SP), CX", x64faDK16)
-	w("\tTESTL\tCX, CX")
-	w("\tJZ\tfadottail")
-	w("fadotloop:")
-	w("\tVCVTPH2PS\t(DX), Y2")
-	w("\tVCVTPH2PS\t16(DX), Y3")
-	w("\tVCVTPH2PS\t(AX), Y4")
-	w("\tVCVTPH2PS\t16(AX), Y5")
-	w("\tVFMADD231PS\tY4, Y2, Y0")
-	w("\tVFMADD231PS\tY5, Y3, Y1")
-	w("\tADDQ\t$32, DX")
-	w("\tADDQ\t$32, AX")
-	w("\tDECL\tCX")
-	w("\tJNZ\tfadotloop")
-	w("fadottail:")
-	w("\tCMPL\t%d(SP), $0", x64faDK8)
-	w("\tJEQ\tfadotdone")
-	w("\tVCVTPH2PS\t(DX), Y2")
-	w("\tVCVTPH2PS\t(AX), Y4")
-	w("\tVFMADD231PS\tY4, Y2, Y0")
-	w("fadotdone:")
-	w("\tVADDPS\tY1, Y0, Y0")
-	w("\tVEXTRACTF128\t$1, Y0, X1")
-	w("\tVADDPS\tX1, X0, X0")
-	w("\tVHADDPS\tX0, X0, X0")
-	w("\tVHADDPS\tX0, X0, X0")
-	// s = s*scale + mv
-	w("\tVMOVSS\t%d(SP), X1", x64faScale)
-	w("\tVFMADD213SS\t%d(SP), X1, X0", x64faMv)
-	// --- online softmax.
+	w("\tJEQ\tfaadvance")
 	w("\tVUCOMISS\tX13, X0")
-	w("\tJA\tfanewmax")
-	// vs = exp(s - M); ms = 1
-	w("\tVSUBSS\tX13, X0, X0")
-	e.exp("X", 0, 0)
-	w("\tVBROADCASTSS\tX0, Y14")
-	w("\tVBROADCASTSS\t%s, Y15", e.sym("one"))
-	w("\tJMP\tfamad")
-	w("fanewmax:")
-	// ms = exp(Mold - s); M = s; VKQ *= ms; vs = 1
-	w("\tVSUBSS\tX0, X13, X1")
-	w("\tVMOVAPS\tX0, X13")
-	w("\tVMOVAPS\tX1, X0")
-	e.exp("X", 0, 0)
-	w("\tVBROADCASTSS\tX0, Y15")
-	w("\tVBROADCASTSS\t%s, Y14", e.sym("one"))
-	w("\tMOVQ\tR13, DX")
-	w("\tMOVL\t%d(SP), CX", x64faDV16)
-	w("\tTESTL\tCX, CX")
-	w("\tJZ\tfascaletail")
-	w("fascale:")
-	w("\tVMULPS\t(DX), Y15, Y0")
-	w("\tVMULPS\t32(DX), Y15, Y1")
-	w("\tVMOVUPS\tY0, (DX)")
-	w("\tVMOVUPS\tY1, 32(DX)")
-	w("\tADDQ\t$64, DX")
-	w("\tDECL\tCX")
-	w("\tJNZ\tfascale")
-	w("fascaletail:")
-	w("\tCMPL\t%d(SP), $0", x64faDV8)
-	w("\tJEQ\tfamad")
-	w("\tVMULPS\t(DX), Y15, Y0")
-	w("\tVMOVUPS\tY0, (DX)")
-	w("famad:")
-	// --- VKQ += vs * V (f16 -> f32): AX = V row, DX = VKQ, CX = chunks.
-	w("\tMOVQ\tDI, AX")
-	w("\tMOVQ\tR13, DX")
-	w("\tMOVL\t%d(SP), CX", x64faDV16)
-	w("\tTESTL\tCX, CX")
-	w("\tJZ\tfamadtail")
-	w("famadloop:")
-	w("\tVCVTPH2PS\t(AX), Y2")
-	w("\tVCVTPH2PS\t16(AX), Y3")
-	w("\tVMOVUPS\t(DX), Y0")
-	w("\tVMOVUPS\t32(DX), Y1")
-	w("\tVFMADD231PS\tY2, Y14, Y0")
-	w("\tVFMADD231PS\tY3, Y14, Y1")
-	w("\tVMOVUPS\tY0, (DX)")
-	w("\tVMOVUPS\tY1, 32(DX)")
+	w("\tJBE\tfanorescale")
+	w("\tVUCOMISS\t%s, X13", negInf)
+	w("\tJEQ\tfanewm") // M = -inf: nothing accumulated yet
+	// ms = exp(M - m_b); S *= ms; VKQ *= ms
+	w("\tVSUBSS\tX0, X13, X14")
+	e.exp("X", 14, 14)
+	w("\tVMULSS\tX14, X12, X12")
+	w("\tVBROADCASTSS\tX14, Y14")
+	w("\tMOVQ\tR13, AX")
+	w("\tMOVL\t%d(SP), CX", x64faDV8)
+	w("farescale:")
+	w("\tVMULPS\t(AX), Y14, Y1")
+	w("\tVMOVUPS\tY1, (AX)")
 	w("\tADDQ\t$32, AX")
-	w("\tADDQ\t$64, DX")
 	w("\tDECL\tCX")
-	w("\tJNZ\tfamadloop")
-	w("famadtail:")
-	w("\tCMPL\t%d(SP), $0", x64faDV8)
-	w("\tJEQ\tfamaddone")
-	w("\tVCVTPH2PS\t(AX), Y2")
-	w("\tVMOVUPS\t(DX), Y0")
-	w("\tVFMADD231PS\tY2, Y14, Y0")
-	w("\tVMOVUPS\tY0, (DX)")
-	w("famaddone:")
-	// S = S*ms + vs
-	w("\tVFMADD213SS\tX14, X15, X12")
-	w("faskip:")
-	w("\tADDQ\tR8, SI")
-	w("\tADDQ\tR9, DI")
-	w("\tDECQ\tR11")
-	w("\tJNZ\tfapos")
+	w("\tJNZ\tfarescale")
+	w("fanewm:")
+	w("\tVMOVAPS\tX0, X13")
+	w("fanorescale:")
+	// --- p = exp(max(s - M, -200)); S += sum(p)
+	w("\tVMOVUPS\t%d(SP), Y14", x64faScores)
+	w("\tVBROADCASTSS\tX13, Y15")
+	w("\tVSUBPS\tY15, Y14, Y14")
+	w("\tVMAXPS\t%s, Y14, Y14", neg200)
+	e.exp("Y", 14, 14)
+	w("\tVMOVUPS\tY14, %d(SP)", x64faP)
+	w("\tVEXTRACTF128\t$1, Y14, X1")
+	w("\tVADDPS\tX1, X14, X1")
+	w("\tVHADDPS\tX1, X1, X1")
+	w("\tVHADDPS\tX1, X1, X1")
+	w("\tVADDSS\tX1, X12, X12")
+	// --- VKQ[c] += sum_i p_i * V_i[c], chunk by chunk
+	for i := 0; i < 8; i++ {
+		w("\tVBROADCASTSS\t%d(SP), Y%d", x64faP+4*i, i)
+	}
+	w("\tMOVQ\tR13, AX")
+	w("\tMOVQ\tDI, CX")
+	w("\tMOVL\t%d(SP), DX", x64faDV8)
+	w("\tMOVL\tDX, %d(SP)", x64faCnt)
+	w("fachunk:")
+	w("\tVMOVUPS\t(AX), Y8")
+	w("\tMOVQ\tCX, DX")
+	for i := 0; i < 8; i++ {
+		if i > 0 {
+			w("\tCMPL\t%d(SP), $%d", x64faNblk, i)
+			w("\tJLE\tfachunkdone")
+		}
+		w("\tVCVTPH2PS\t(DX), Y9")
+		w("\tVFMADD231PS\tY%d, Y9, Y8", i)
+		if i < 7 {
+			w("\tADDQ\tR9, DX")
+		}
+	}
+	w("fachunkdone:")
+	w("\tVMOVUPS\tY8, (AX)")
+	w("\tADDQ\t$32, AX")
+	w("\tADDQ\t$16, CX")
+	w("\tDECL\t%d(SP)", x64faCnt)
+	w("\tJNZ\tfachunk")
+	w("faadvance:")
+	w("\tMOVL\t%d(SP), AX", x64faNblk)
+	w("\tMOVQ\tAX, DX")
+	w("\tIMULQ\tR8, DX")
+	w("\tADDQ\tDX, SI")
+	w("\tMOVQ\tAX, DX")
+	w("\tIMULQ\tR9, DX")
+	w("\tADDQ\tDX, DI")
+	w("\tTESTQ\tR10, R10")
+	w("\tJZ\tfanomaskadv")
+	w("\tLEAQ\t(R10)(AX*2), R10")
+	w("fanomaskadv:")
+	w("\tSUBQ\tAX, R11")
+	w("\tJNZ\tfablk")
 	w("fadone:")
 	w("\tVMOVSS\tX12, (R12)")
 	w("\tVMOVSS\tX13, 4(R12)")
