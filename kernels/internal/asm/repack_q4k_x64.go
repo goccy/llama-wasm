@@ -59,9 +59,10 @@ const (
 	x64Q4KFrame = 80
 )
 
-// x64Q4KScalesMins decodes the 12 packed bytes at off(reg) into R9 =
+// x64Q4KScalesMins decodes the 12 packed bytes at off(reg) into R13 =
 // scales 0..3 | scales 4..7 << 32 and R10 = mins likewise (eight bytes
-// each), through R12, R13, BX.
+// each), through R12, R13, BX, R11 and AX. reg is left alone (the
+// callers pass the weight block pointer in R9).
 func x64Q4KScalesMins(w func(string, ...any), reg string, off int) {
 	w("\tMOVL\t%d(%s), R12", off, reg)   // sm0
 	w("\tMOVL\t%d(%s), R13", off+4, reg) // sm1
@@ -80,8 +81,8 @@ func x64Q4KScalesMins(w func(string, ...any), reg string, off int) {
 	w("\tSHLQ\t$32, R11")
 	w("\tORQ\tR11, R10")
 	// scales: lo = sm0 & 0x3f3f3f3f; hi = (sm2 & 0x0f0f0f0f) | (((sm0>>6)&0x03030303)<<4)
-	w("\tMOVL\tR12, R9")
-	w("\tANDL\t$0x3f3f3f3f, R9")
+	w("\tMOVL\tR12, R13")
+	w("\tANDL\t$0x3f3f3f3f, R13")
 	w("\tMOVL\tBX, R11")
 	w("\tANDL\t$0x0f0f0f0f, R11")
 	w("\tMOVL\tR12, AX")
@@ -90,7 +91,7 @@ func x64Q4KScalesMins(w func(string, ...any), reg string, off int) {
 	w("\tSHLL\t$4, AX")
 	w("\tORL\tAX, R11")
 	w("\tSHLQ\t$32, R11")
-	w("\tORQ\tR11, R9")
+	w("\tORQ\tR11, R13")
 }
 
 // x64Q4K8x8Body emits the per-column-group body shared by the GEMV and
@@ -148,10 +149,10 @@ func x64Q4K8x8Body(w func(string, ...any), lbl string, gemm bool, row int) {
 	for sb := 0; sb < 4; sb++ {
 		// scales/mins of sub-blocks 2sb (low) and 2sb+1 (high)
 		x64Q4KScalesMins(w, "R9", q4Kx8ScalesOff+24*sb)
-		w("\tVMOVQ\tR9, X6")
+		w("\tVMOVQ\tR13, X6")
 		w("\tVMOVQ\tR10, X7")
 		x64Q4KScalesMins(w, "R9", q4Kx8ScalesOff+24*sb+12)
-		w("\tVMOVQ\tR9, X12")
+		w("\tVMOVQ\tR13, X12")
 		w("\tVMOVQ\tR10, X15")
 		w("\tVPSHUFB\tX10, X6, X6")    // scales lo, hadd order
 		w("\tVPSHUFB\tX10, X12, X12")  // scales hi
