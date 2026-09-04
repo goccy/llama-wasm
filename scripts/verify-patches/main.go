@@ -14,6 +14,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -57,6 +58,29 @@ var registry = map[string]verification{
 	"wasm-q8-quantize-round-nearest.patch": {
 		reason: "verified by go-llama's native-parity and prompt batch-invariance tests against the released bundle",
 	},
+	// The K-quant / q5_0 vec_dot exports are structural: the export
+	// names must be present in the binary for wasm2go's assembly
+	// overrides (kernels/) to attach; a module without them silently
+	// runs the transpiled bodies instead.
+	"wasm-kquant-vec-dot-kernels.patch": {
+		verify: hasExports("dbg_vec_dot_q5_0_q8_0", "dbg_vec_dot_q4_K_q8_K", "dbg_vec_dot_q6_K_q8_K"),
+	},
+}
+
+// hasExports checks that every name appears in the module's export
+// section. Export names are stored as length-prefixed UTF-8 in the
+// binary, so a missing byte string is a missing export; a present one
+// is accepted without decoding the section (nothing else in the module
+// carries a dbg_-prefixed name).
+func hasExports(names ...string) func([]byte) error {
+	return func(wasm []byte) error {
+		for _, n := range names {
+			if !bytes.Contains(wasm, []byte(n)) {
+				return fmt.Errorf("export %q not found in the module", n)
+			}
+		}
+		return nil
+	}
 }
 
 func run() error {

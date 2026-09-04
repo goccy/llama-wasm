@@ -40,6 +40,9 @@ would retire the addition.
 | `dbg_vec_swiglu_f32` | SwiGLU row | arm64 neon, amd64 avx2 | same as soft_max |
 | `dbg_vec_dot_f16` | f16 dot (single-query attention K·Q) | arm64 neon, amd64 avx2 | lower the f16-table gather to FCVTL/VCVTPH2PS + FMA |
 | `dbg_vec_mad_f16_f32` | f16-by-f32 multiply-add (attention V accumulate) | arm64 neon, amd64 avx2 | same as `dbg_vec_dot_f16` |
+| `dbg_vec_dot_q5_0_q8_0` | q5_0 x q8_0 dot (the matmul of tensors K-quants cannot cover, e.g. Qwen2.5-0.5B's 896-wide rows) | arm64 dotprod | lower the fifth-bit gather + i16 dot pairs to CMTST/SDOT |
+| `dbg_vec_dot_q4_K_q8_K` | q4_K x q8_K dot (Q4_K_M matmul) | arm64 dotprod | lower the packed 6-bit scale unpack and the nibble dot pairs to SDOT with by-element scaling |
+| `dbg_vec_dot_q6_K_q8_K` | q6_K x q8_K dot (Q4_K_M's q6_K tensors) | arm64 dotprod | same as `dbg_vec_dot_q4_K_q8_K` |
 
 ## Layout
 
