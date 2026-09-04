@@ -74,6 +74,10 @@ var registry = map[string]verification{
 	"wasm-q8-repack-q4k-kernels.patch": {
 		verify: hasExports("dbg_gemv_q4_K_8x8", "dbg_gemm_q4_K_8x8"),
 	},
+	// The q8_Kx4 activation quantizer export (the repack GEMM's input).
+	"wasm-q8k-quantize-mat-export.patch": {
+		verify: hasExports("dbg_quantize_mat_q8_K_4x8"),
+	},
 }
 
 // hasExports checks that every name appears in the module's export
