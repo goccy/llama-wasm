@@ -177,6 +177,21 @@
       ]
     },
     {
+      "export": "dbg_flash_attn_kv_f16",
+      "params": [
+        "i64"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "neon",
+          "frame": 16,
+          "file": "dbg_flash_attn_kv_f16_arm64_neon.s"
+        }
+      ]
+    },
+    {
       "export": "dbg_vec_dot_q5_0_q8_0",
       "params": [
         "i32",

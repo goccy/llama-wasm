@@ -101,6 +101,13 @@ func Overrides() *Manifest {
 				},
 			},
 			{
+				Export: "dbg_flash_attn_kv_f16",
+				Params: []string{"i64"},
+				Bodies: []Body{
+					body("dbg_flash_attn_kv_f16", "arm64", "neon", 16, func(sym string, p *ConstPool) string { return a64FlashAttnKernel(sym, p, wide) }),
+				},
+			},
+			{
 				Export: "dbg_vec_dot_q5_0_q8_0",
 				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
 				Bodies: []Body{

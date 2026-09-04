@@ -65,6 +65,10 @@ var registry = map[string]verification{
 	"wasm-kquant-vec-dot-kernels.patch": {
 		verify: hasExports("dbg_vec_dot_q5_0_q8_0", "dbg_vec_dot_q4_K_q8_K", "dbg_vec_dot_q6_K_q8_K"),
 	},
+	// The flash-attention KV loop export is structural in the same way.
+	"wasm-flash-attn-kv-loop-export.patch": {
+		verify: hasExports("dbg_flash_attn_kv_f16"),
+	},
 }
 
 // hasExports checks that every name appears in the module's export
