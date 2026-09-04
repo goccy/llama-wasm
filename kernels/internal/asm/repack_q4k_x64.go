@@ -61,7 +61,8 @@ const (
 	// i32 partials (4 x 32) | 192 sumi accumulators (4 x 32) | 320 bias
 	// accumulators (4 x 32) | 448 f32 accumulators (4 x 32) | 576 vx |
 	// 584 activation base | 592 tile output | 600 column groups left |
-	// 608 row groups left | 616 bs bytes | 624 group stride.
+	// 608 row groups left | 616 bs bytes | 624 group stride | 632 column
+	// groups left.
 	x64Q4KTileFrame = 640
 )
 
@@ -455,9 +456,12 @@ func x64GemmQ4K8x8Kernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tMOVQ\tR12, 608(SP)") // row groups left
 	w("\tMOVQ\tR13, 616(SP)") // bs bytes
 	w("\tMOVQ\tR10, 624(SP)") // group stride
+	// the scale decoder clobbers R10..R13 and BX: every loop count lives
+	// on the frame, 632 being the column groups left in this row group.
 	w("gmrows:")
 	w("\tMOVQ\t576(SP), SI")
-	w("\tMOVQ\t600(SP), R11")
+	w("\tMOVQ\t600(SP), AX")
+	w("\tMOVQ\tAX, 632(SP)")
 	w("gmcols:")
 	w("\tMOVQ\t584(SP), DX")
 	x64Q4KGemmTile(w)
@@ -473,7 +477,7 @@ func x64GemmQ4K8x8Kernel(sym string, pool *ConstPool, wide bool) string {
 	}
 	w("\tADDQ\t$32, 592(SP)")
 	w("\tADDQ\t624(SP), SI")
-	w("\tDECQ\tR11")
+	w("\tDECQ\t632(SP)")
 	w("\tJNZ\tgmcols")
 	// next row group: activations advance nb blocks; the tile base moves
 	// back by the columns written and down four rows.
