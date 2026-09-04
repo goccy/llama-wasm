@@ -1,0 +1,28 @@
+name: debug-vnni
+on:
+  push:
+    branches: [debug/vnni-kernels]
+jobs:
+  kernels-vnni:
+    strategy:
+      fail-fast: false
+      matrix:
+        idx: [1, 2, 3, 4, 5, 6]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: kernels/go.mod
+      - name: CPU flags
+        run: |
+          grep -m1 "model name" /proc/cpuinfo
+          grep -m1 -o "avx2" /proc/cpuinfo || echo "NO avx2"
+          grep -m1 -o "avx512_vnni" /proc/cpuinfo || echo "NO avx512_vnni"
+      - name: Kernel tests (verbose)
+        working-directory: kernels
+        run: |
+          if ! grep -q avx512_vnni /proc/cpuinfo; then
+            echo "::warning::runner has no VNNI, tests will not cover the vnni bodies"
+          fi
+          go test ./... -count=1 -v 2>&1 | grep -v "^=== RUN\|^    --- SKIP" | tail -80
