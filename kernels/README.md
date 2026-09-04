@@ -66,7 +66,7 @@ would retire the addition.
 | `dbg_vec_dot_q3_K_q8_K` | q3_K x q8_K dot (Q3_K rows) | arm64 dotprod, amd64 avx2 | quants rebuilt unsigned (2-bit field + hmask bit), 6-bit scales unpacked and centred, -4 folded through the block sums |
 | `dbg_vec_dot_q4_K_q8_K` | q4_K x q8_K dot (Q4_K_M matmul, rows not a multiple of 8) | arm64 dotprod, amd64 avx2 | lower the packed 6-bit scale unpack and the nibble dot pairs to SDOT with by-element scaling |
 | `dbg_vec_dot_q6_K_q8_K` | q6_K x q8_K dot (Q4_K_M's q6_K tensors) | arm64 dotprod, amd64 avx2 | same as `dbg_vec_dot_q4_K_q8_K` |
-| `dbg_flash_attn_kv_f16` | single-query flash-attention KV loop (F16 K/V: K.Q dot, online softmax, V accumulate) | arm64 neon, amd64 avx2 | keep the per-position loop in registers (no per-position calls, an inline expf) |
+| `dbg_flash_attn_kv_f16` | single-query flash-attention KV loop (F16 K/V: K.Q dot, online softmax, V accumulate) | arm64 fhm, arm64 neon, amd64 avx2 | fhm: blocks of eight positions, FMLAL K.Q, one vectorized expf per block, V accumulated in f16 registers (the native NEON path's VKQ16); neon/avx2: keep the per-position loop in registers (no per-position calls, an inline expf) |
 
 ## Layout
 
