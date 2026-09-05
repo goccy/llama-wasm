@@ -185,6 +185,12 @@
       "bodies": [
         {
           "arch": "arm64",
+          "feature": "fhm",
+          "frame": 304,
+          "file": "dbg_flash_attn_kv_f16_arm64_fhm.s"
+        },
+        {
+          "arch": "arm64",
           "feature": "neon",
           "frame": 16,
           "file": "dbg_flash_attn_kv_f16_arm64_neon.s"
