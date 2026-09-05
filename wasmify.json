@@ -112,6 +112,7 @@
       "llama_model_load",
       "llama_model_free",
       "llama_model_info",
+      "llama_model_tensors",
       "llama_model_load_progress_addr",
       "llama_ctx_new",
       "llama_ctx_free",
@@ -172,7 +173,7 @@
   },
   "phases": {
     "gen-proto": {
-      "completed_at": "2026-08-28T09:08:22Z",
+      "completed_at": "2026-09-05T08:12:35Z",
       "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
       "output_files": [
         "proto/llama.proto",
@@ -182,7 +183,7 @@
       ]
     },
     "parse-headers": {
-      "completed_at": "2026-08-28T09:08:22Z",
+      "completed_at": "2026-09-05T08:11:11Z",
       "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
       "output_files": [
         "api-spec.json"

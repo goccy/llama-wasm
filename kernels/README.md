@@ -6,8 +6,9 @@ do, and this directory supplies those bodies by hand through wasm2go's
 **assembly-override** mechanism (see `docs/asm-overrides.md` in
 wasm2go): the wasm build exports each kernel under a `dbg_*` name (see
 `patches/`), `asm/overrides.json` names the exports with their wasm
-signatures, and `asm/*.s` hold one body per architecture and CPU
-feature level. wasm2go validates the manifest against the module,
+signatures, `asm/kernels.json` indexes them by role and tensor type
+(embedded in the bundle as `base.AsmKernels`), and `asm/*.s` hold one
+body per architecture and CPU feature level. wasm2go validates the manifest against the module,
 wraps each body in its fixed ABI, dispatches on CPU features at run
 time, and keeps its own lowering as the fallback.
 
@@ -72,7 +73,7 @@ would retire the addition.
   reference over every length class it handles (vector body, tails,
   empty), executed on the host when it has the feature and assembled
   and linked everywhere.
-- `cmd/genkernels/` — writes `asm/*.s` and `asm/overrides.json`.
+- `cmd/genkernels/` — writes `asm/*.s`, `asm/overrides.json` and `asm/kernels.json`.
 - `asm/` — the generated, checked-in output the build consumes
   (`WASM2GO_ASM_OVERRIDES` in the Makefile).
 

@@ -233,6 +233,18 @@ bundle-gomod:
 	printf 'module %s\n\ngo %s\n' "$$path" "$(WASM2GO_BUNDLE_GO_VER)" \
 		> $(WASM2GO_BUNDLE_DIR)/go.mod; \
 	echo "wrote $(WASM2GO_BUNDLE_DIR)/go.mod (module $$path)"
+	@# The kernel index rides along in the base package so an embedder can
+	@# map a model's tensors to the native bodies this bundle carries.
+	@cp $(dir $(WASM2GO_ASM_OVERRIDES))kernels.json $(WASM2GO_BUNDLE_DIR)/base/asm_kernels.json && \
+	printf '%s\n' 'package base' '' 'import _ "embed"' '' \
+		'// AsmKernels indexes the assembly overrides this bundle was transpiled with' \
+		'// (kernels/asm/kernels.json in llama-wasm): every exported kernel a native' \
+		'// body replaces, with what it computes (role), the tensor type it serves' \
+		'// (quant) and the architectures that carry a body.' \
+		'//' \
+		'//go:embed asm_kernels.json' \
+		'var AsmKernels []byte' > $(WASM2GO_BUNDLE_DIR)/base/asm_kernels.go && \
+	echo "wrote $(WASM2GO_BUNDLE_DIR)/base/asm_kernels.go"
 
 # Drop everything wasmify regenerates so the next `make wasm` runs from scratch.
 # The committed inputs (wasmify.json, buf.{yaml,gen.yaml}, proto/wasmify,

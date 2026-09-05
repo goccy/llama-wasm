@@ -10,6 +10,9 @@
 
 #include "llama.h"
 #include "ggml-cpu.h"
+// The tensor list walks llama_model::tensors_by_name; the struct lives in
+// llama.cpp's internal headers (the bridge pins the submodule commit).
+#include "llama.cpp/src/llama-model.h"
 
 #include <algorithm>
 #include <chrono>
@@ -404,6 +407,33 @@ void llama_model_free(uint64_t model) {
     if (st == nullptr) return;
     if (st->model != nullptr) llama_model_free(st->model);
     delete st;
+}
+
+std::string llama_model_tensors(uint64_t model) {
+    ModelState *st = model_of(model);
+    if (st == nullptr) return json_err("null model handle");
+    std::string out = "{\"ok\":true,\"tensors\":[";
+    bool first = true;
+    for (const auto & kv : st->model->tensors_by_name) {
+        const ggml_tensor * t = kv.second;
+        if (t == nullptr) continue;
+        if (!first) out += ",";
+        first = false;
+        out += "{\"name\":" + json_str(kv.first);
+        out += ",\"type\":" + json_str(ggml_type_name(t->type));
+        out += ",\"ne\":[";
+        for (int i = 0; i < GGML_MAX_DIMS && (i == 0 || t->ne[i] > 1); i++) {
+            if (i) out += ",";
+            out += json_num((double) t->ne[i]);
+        }
+        out += "]";
+        out += ",\"buffer\":" + json_str(t->buffer ? ggml_backend_buffer_name(t->buffer) : "");
+        const ggml_type_traits_cpu * tr = ggml_get_type_traits_cpu(t->type);
+        out += ",\"vec_dot_type\":" + json_str(tr ? ggml_type_name(tr->vec_dot_type) : "");
+        out += "}";
+    }
+    out += "]}";
+    return out;
 }
 
 std::string llama_model_info(uint64_t model) {

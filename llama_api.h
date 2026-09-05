@@ -71,6 +71,14 @@ void llama_model_free(uint64_t model);
  * and the chat template when the GGUF carries one. */
 std::string llama_model_info(uint64_t model);
 
+/* JSON list of the model's weight tensors:
+   {"ok":true,"tensors":[{"name":"blk.0.attn_q.weight","type":"q4_K",
+   "ne":[1536,1536],"buffer":"CPU_REPACK","vec_dot_type":"q8_K"},...]}
+   buffer is the ggml backend buffer holding the tensor ("CPU_REPACK" when
+   the CPU backend repacked it for its GEMV/GEMM kernels, "CPU" otherwise),
+   vec_dot_type the activation type its dot product quantizes to. */
+std::string llama_model_tensors(uint64_t model);
+
 /* Address, in linear memory, of a float the loader updates with its progress
  * (0.0 .. 1.0) while llama_model_load runs. A host thread can poll it to drive
  * a progress bar. Valid for the lifetime of the wasm instance. */
