@@ -250,13 +250,114 @@ func itoa(i int) string {
 	}
 	return string(b)
 }
+
+// runAttnLayout runs the kernel over n real positions from a fresh state,
+// with one fully masked row (junk K and V, mask -inf) inserted before each
+// real index listed in holes, and returns the bytes of S, M and VKQ. A
+// masked position contributes nothing, so the result must not depend on
+// holes: the kernel's block-of-eight schedule must not leak into the
+// arithmetic (a unified KV cache places a sequence's cells at arbitrary
+// offsets, and the same sequence must score identically wherever it sits).
+func runAttnLayout(t *testing.T, kernel attnKernel, DK, DV, n int, holes []int, seed uint32) []byte {
+	t.Helper()
+	total := n + len(holes)
+	s := lcg(seed)
+	nbk, nbv := 2*DK, 2*DV
+	qOff := 256
+	kOff := qOff + 2*DK + 64
+	vOff := kOff + total*nbk + 64
+	mOff := vOff + total*nbv + 64
+	smOff := mOff + 2*total + 64
+	vkqOff := smOff + 64
+	argOff := vkqOff + 4*DV + 64
+	mem := make([]byte, argOff+96+256)
+	for i := 0; i < DK; i++ {
+		put16(mem, qOff+2*i, f16bits(float32(s.unit()*0.5)))
+	}
+	// the real rows come from the seed in order, so every layout sees the
+	// same rows
+	krow := make([][]uint16, n)
+	vrow := make([][]uint16, n)
+	mrow := make([]uint16, n)
+	for r := 0; r < n; r++ {
+		krow[r] = make([]uint16, DK)
+		vrow[r] = make([]uint16, DV)
+		for i := range krow[r] {
+			krow[r][i] = f16bits(float32(s.unit() * 0.5))
+		}
+		for i := range vrow[r] {
+			vrow[r][i] = f16bits(float32(s.unit()))
+		}
+		if r%5 == 2 {
+			mrow[r] = f16bits(float32(s.unit() * 0.25))
+		}
+	}
+	// a hole index of n (or beyond) appends the masked row after the last
+	// real one
+	junk := lcg(seed ^ 0x9e3779b9)
+	p := 0
+	for r := 0; r <= n; r++ {
+		for _, h := range holes {
+			if h > n {
+				h = n
+			}
+			if h != r {
+				continue
+			}
+			for i := 0; i < DK; i++ {
+				put16(mem, kOff+p*nbk+2*i, f16bits(float32(junk.unit())))
+			}
+			for i := 0; i < DV; i++ {
+				put16(mem, vOff+p*nbv+2*i, f16bits(float32(junk.unit())))
+			}
+			put16(mem, mOff+2*p, 0xfc00)
+			p++
+		}
+		if r == n {
+			break
+		}
+		for i := 0; i < DK; i++ {
+			put16(mem, kOff+p*nbk+2*i, krow[r][i])
+		}
+		for i := 0; i < DV; i++ {
+			put16(mem, vOff+p*nbv+2*i, vrow[r][i])
+		}
+		put16(mem, mOff+2*p, mrow[r])
+		p++
+	}
+	put32(mem, smOff, 0)
+	put32(mem, smOff+4, float32(math.Inf(-1)))
+	memSize := uint64(len(mem))
+	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	put64(mem, argOff+0, uint64(qOff))
+	put64(mem, argOff+8, uint64(kOff))
+	put64(mem, argOff+16, uint64(nbk))
+	put64(mem, argOff+24, uint64(vOff))
+	put64(mem, argOff+32, uint64(nbv))
+	put64(mem, argOff+40, uint64(mOff))
+	put64(mem, argOff+48, uint64(smOff))
+	put64(mem, argOff+56, uint64(vkqOff))
+	put64(mem, argOff+64, 0)
+	put64(mem, argOff+72, uint64(total))
+	put32(mem, argOff+80, 0.5)
+	put32(mem, argOff+84, 0.125)
+	put64(mem, argOff+88, uint64(uint32(DK))|uint64(uint32(DV))<<32)
+	kernel(m, int64(argOff))
+	out := make([]byte, 8+4*DV)
+	copy(out, mem[smOff:smOff+8])
+	copy(out[8:], mem[vkqOff:vkqOff+4*DV])
+	return out
+}
 `
 
 const flashAttnDecls = "\nfunc AttnKernel(m *mockModule, l0 int64)\nfunc trapstub()\n\nvar _ = trapstub\n"
 
 const flashAttnRunTest = `package attnrun
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestFlashAttn(t *testing.T) {
 	seed := uint32(7)
@@ -279,6 +380,23 @@ func TestFlashAttn(t *testing.T) {
 	}
 	// an empty range leaves the state alone
 	runAttn(t, AttnKernel, 64, 64, 4, 4, 0, false, true, 99)
+}
+
+// TestFlashAttnLayoutInvariance: masked rows inserted anywhere must leave
+// S, M and VKQ bit-identical.
+func TestFlashAttnLayoutInvariance(t *testing.T) {
+	seed := uint32(101)
+	for _, d := range [][2]int{{64, 64}, {128, 128}, {16, 32}, {24, 40}, {64, 128}} {
+		for _, n := range []int{1, 3, 8, 13, 40} {
+			seed++
+			want := runAttnLayout(t, AttnKernel, d[0], d[1], n, nil, seed)
+			for _, holes := range [][]int{{0}, {0, 0, 0}, {0, 0, 0, 0, 0, 0, 0}, {n / 2}, {1, 1, n - 1}, {n}, {n, n, n, n, n}, {0, 0, 0, 0, 0, n / 2, n / 2, n / 2, n}} {
+				if got := runAttnLayout(t, AttnKernel, d[0], d[1], n, holes, seed); !bytes.Equal(got, want) {
+					t.Fatalf("DK=%d DV=%d n=%d holes=%v: result depends on the layout of masked rows\n got %x\nwant %x", d[0], d[1], n, holes, got, want)
+				}
+			}
+		}
+	}
 }
 `
 
