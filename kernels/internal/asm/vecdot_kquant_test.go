@@ -163,6 +163,26 @@ func runQ6_K(t *testing.T, kernel dotKernel, n int) {
 
 func runQ4_KTile(t *testing.T, kernel dotKernel, n int) { runTile(t, "q4_K", kernel, n, genQ4_K) }
 func runQ6_KTile(t *testing.T, kernel dotKernel, n int) { runTile(t, "q6_K", kernel, n, genQ6_K) }
+
+// runTileExact pins the nrc == 2 tile to the four single dots bit for bit:
+// ggml picks nrc per chunk from the batch shape, so a batched and a
+// single-token decode meet the same rows through different nrc and must
+// agree exactly.
+func runTileExact(t *testing.T, name string, kernel dotKernel, n int, gen func(int, uint32) ([]byte, []byte, float64)) {
+	t.Helper()
+	x0, y0, _ := gen(n, uint32(n)*97+1)
+	x1, y1, _ := gen(n, uint32(n)*89+2)
+	got := callDot2(t, kernel, n, x0, x1, y0, y1)
+	want := [4]float32{
+		callDot(t, kernel, n, x0, y0), callDot(t, kernel, n, x1, y0),
+		callDot(t, kernel, n, x0, y1), callDot(t, kernel, n, x1, y1),
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("%s tile n=%d lane %d = %v, single dot %v: the two nrc paths must be bit-identical", name, n, i, got[i], want[i])
+		}
+	}
+}
 `
 
 const kQuantDecls = "\nfunc Q4KKernel(m *mockModule, l0 int32, l1, l2, l3, l4, l5, l6 int64, l7 int32)\nfunc Q6KKernel(m *mockModule, l0 int32, l1, l2, l3, l4, l5, l6 int64, l7 int32)\nfunc trapstub()\n\nvar _ = trapstub\n"
@@ -176,6 +196,8 @@ func TestKQuant(t *testing.T) {
 		runQ4_K(t, Q4KKernel, n)
 		runQ6_K(t, Q6KKernel, n)
 		runQ4_KTile(t, Q4KKernel, n)
+		runTileExact(t, "q4_K", Q4KKernel, n, genQ4_K)
+		runTileExact(t, "q6_K", Q6KKernel, n, genQ6_K)
 		runQ6_KTile(t, Q6KKernel, n)
 	}
 }
@@ -211,7 +233,7 @@ func TestX64VecDotQuantKernelShape(t *testing.T) {
 		}
 	}
 	k := x64QuantConsts()
-	if len(k) != 672 || k[96+8] != 1 || k[128] != 0xfe || k[288+32*3] != 6 || k[288+32*3+1] != 7 || k[544+16*7+8] != 15 {
+	if len(k) != 832 || k[800] != 0x10 || int8(k[768]) != -127 || int8(k[768+31]) != 113 || k[96+8] != 1 || k[128] != 0xfe || k[288+32*3] != 6 || k[288+32*3+1] != 7 || k[544+16*7+8] != 15 || k[672] != 1 || k[704+31] != 2 || k[736] != 32 {
 		t.Errorf("x64 quant const blob layout")
 	}
 }
@@ -230,6 +252,8 @@ func TestQuant(t *testing.T) {
 		runQ4_K(t, Q4KKernel, n)
 		runQ6_K(t, Q6KKernel, n)
 		runQ4_KTile(t, Q4KKernel, n)
+		runTileExact(t, "q4_K", Q4KKernel, n, genQ4_K)
+		runTileExact(t, "q6_K", Q6KKernel, n, genQ6_K)
 		runQ6_KTile(t, Q6KKernel, n)
 	}
 }

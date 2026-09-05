@@ -40,13 +40,27 @@ would retire the addition.
 | `dbg_vec_swiglu_f32` | SwiGLU row | arm64 neon, amd64 avx2 | same as soft_max |
 | `dbg_vec_dot_f16` | f16 dot (single-query attention K·Q) | arm64 neon, amd64 avx2 | lower the f16-table gather to FCVTL/VCVTPH2PS + FMA |
 | `dbg_vec_mad_f16_f32` | f16-by-f32 multiply-add (attention V accumulate) | arm64 neon, amd64 avx2 | same as `dbg_vec_dot_f16` |
+| `dbg_gemv_iq4_nl_8x8` | iq4_nl_8x8 repack GEMV (IQ4_NL decode matmul, rows a multiple of 8) | arm64 dotprod, amd64 avx2 | the q4_0 body with the nibbles looked up in kvalues_iq4nl (TBL signed / VPSHUFB table+127 with 127 x block sums folded out) |
+| `dbg_gemm_iq4_nl_8x8` | iq4_nl_8x8 x q8_0x4 repack GEMM (IQ4_NL prompt matmul) | arm64 i8mm, amd64 avx2 | the q4_0 tile with the kvalues lookup |
+| `dbg_gemv_q4_0_8x8` | q4_0_8x8 repack GEMV (Q4_0 decode matmul, rows a multiple of 8) | arm64 dotprod, amd64 avx2 | the q5_0 body without fifth bits, -8 folded through the block sum |
+| `dbg_gemm_q4_0_8x8` | q4_0_8x8 x q8_0x4 repack GEMM (Q4_0 prompt matmul) | arm64 i8mm, amd64 avx2 | the q5_0 tile without fifth bits |
 | `dbg_gemv_q5_0_8x8` | q5_0_8x8 repack GEMV (Q5_0 decode matmul, rows a multiple of 8) | arm64 dotprod, amd64 avx2 | SDOT/VPMADDUBSW over the eight interleaved rows, fifth bits expanded with TBL/VPSHUFB, -16 folded through the block sum |
 | `dbg_gemm_q5_0_8x8` | q5_0_8x8 x q8_0x4 repack GEMM (Q5_0 prompt matmul; native x86 reaches a GEMM here through llamafile sgemm) | arm64 i8mm, amd64 avx2 | SMMLA 2x2 tiles / four activation rows per unpacked run |
-| `dbg_quantize_mat_q8_0_4x8` | f32 rows -> block_q8_0x4 (the 8-wide repack GEMMs' activation quantizer; scalar in every ggml build) | arm64 neon, amd64 avx2 | FMAXV amax, FCVTAS quants |
+| `dbg_quantize_mat_q8_0_4x8` | f32 rows -> block_q8_0x4 (the 8-wide repack GEMMs' activation quantizer; ggml has only a scalar body, the wasm patch adds a SIMD one that rounds to nearest even like `quantize_row_q8_0`, which feeds the same tensors' GEMV path) | arm64 neon, amd64 avx2 | FMAXV amax, FCVTNS quants |
 | `dbg_quantize_mat_q8_K_4x8` | f32 rows -> block_q8_Kx4 (the repack GEMM's activation quantizer; scalar in every ggml build) | arm64 neon, amd64 avx2 | FMAXV/FMINV max, FCVTNS quants, ADDV chunk sums |
 | `dbg_gemv_q4_K_8x8` | q4_K_8x8 repack GEMV (Q4_K decode matmul, rows a multiple of 8) | arm64 dotprod, amd64 avx2 | lower the 8-row nibble dot to SDOT/VPMADDUBSW with the 6-bit scales decoded once per block |
 | `dbg_gemm_q4_K_8x8` | q4_K_8x8 x q8_Kx4 repack GEMM (Q4_K prompt matmul) | arm64 i8mm, amd64 avx2 | register-blocked 8x4 int8 tile (SMMLA / VPMADDUBSW) with the block sums folded in as a bias |
+| `dbg_gemv_q5_K_8x8` | q5_K_8x8 repack GEMV (Q5_K decode matmul, rows a multiple of 8) | arm64 dotprod, amd64 avx2 | the q4_K body with the fifth bit of every quant merged from qh |
+| `dbg_gemm_q5_K_8x8` | q5_K_8x8 x q8_Kx4 repack GEMM (Q5_K prompt matmul) | arm64 i8mm, amd64 avx2 | the q4_K tile with the fifth bits merged from qh |
+| `dbg_gemv_q6_K_8x8` | q6_K_8x8 repack GEMV (Q6_K decode matmul, rows a multiple of 8) | arm64 dotprod, amd64 avx2 | 6-bit quants rebuilt unsigned from ql nibbles and qh bit pairs, SDOT/VPMADDUBSW over the eight interleaved rows, i8 sub-block scales as i32 lane multiplies, -32 folded through the block sums |
+| `dbg_gemm_q6_K_8x8` | q6_K_8x8 x q8_Kx4 repack GEMM (Q6_K prompt matmul) | arm64 i8mm, amd64 avx2 | SMMLA 2x2 tiles over centred quants / four activation rows per 6-bit unpack with the block sums folded in as a bias |
+| `dbg_vec_dot_iq4_nl_q8_0` | iq4_nl x q8_0 dot (IQ4_NL rows that are not repacked) | arm64 dotprod, amd64 avx2 | TBL / VPSHUFB through the signed kvalues table, then SDOT / the sign-trick pair dot |
+| `dbg_vec_dot_q5_1_q8_1` | q5_1 x q8_1 dot (Q5_1 rows) | arm64 dotprod, amd64 avx2 | the q5_0 dot on unsigned quants plus the block min term m * s |
+| `dbg_vec_dot_q4_1_q8_1` | q4_1 x q8_1 dot (Q4_1 rows) | arm64 dotprod, amd64 avx2 | nibbles unsigned, SDOT / VPMADDUBSW, plus the block min term |
 | `dbg_vec_dot_q5_0_q8_0` | q5_0 x q8_0 dot (the matmul of tensors K-quants cannot cover, e.g. Qwen2.5-0.5B's 896-wide rows) | arm64 dotprod, amd64 avx2 | lower the fifth-bit gather + i16 dot pairs to CMTST/SDOT |
+| `dbg_vec_dot_q5_K_q8_K` | q5_K x q8_K dot (Q5_K rows that are not repacked; 2x2 tile for nrc 2) | arm64 dotprod, amd64 avx2 | the q4_K dot with the fifth bit of every quant merged from qh |
+| `dbg_vec_dot_q2_K_q8_K` | q2_K x q8_K dot (Q2_K rows) | arm64 dotprod, amd64 avx2 | 2-bit fields shifted out of 32-byte loads, SDOT/VPMADDUBSW per 16-quant sub-block, nibble scales as lane multiplies, mins through the block sums |
+| `dbg_vec_dot_q3_K_q8_K` | q3_K x q8_K dot (Q3_K rows) | arm64 dotprod, amd64 avx2 | quants rebuilt unsigned (2-bit field + hmask bit), 6-bit scales unpacked and centred, -4 folded through the block sums |
 | `dbg_vec_dot_q4_K_q8_K` | q4_K x q8_K dot (Q4_K_M matmul, rows not a multiple of 8) | arm64 dotprod, amd64 avx2 | lower the packed 6-bit scale unpack and the nibble dot pairs to SDOT with by-element scaling |
 | `dbg_vec_dot_q6_K_q8_K` | q6_K x q8_K dot (Q4_K_M's q6_K tensors) | arm64 dotprod, amd64 avx2 | same as `dbg_vec_dot_q4_K_q8_K` |
 | `dbg_flash_attn_kv_f16` | single-query flash-attention KV loop (F16 K/V: K.Q dot, online softmax, V accumulate) | arm64 neon, amd64 avx2 | keep the per-position loop in registers (no per-position calls, an inline expf) |

@@ -103,13 +103,18 @@ func a64VecDotQ6_KKernel(sym string, _ *ConstPool, wide bool) string {
 	e.smlal2_4s(10, 8, 2)
 	e.smlal4s(10, 9, 3)
 	e.smlal2_4s(10, 9, 3)
-	// isum - 32 * mins-term, scaled by d = f16(x.d) * y.d.
-	e.shl4s(10, 10, 5)
-	e.sub4s(1, 1, 10)
+	// d = f16(x.d) * y.d; sumf -= d * 32 * mins-term, sumf += d * isum, each
+	// reduced to a per-block scalar before converting: the nrc == 2 tile
+	// folds this way, so the single path rounds identically.
 	e.ldurS(11, 4, 0)
 	e.ldurH(13, 3, 208)
 	e.fcvtSH(13, 13)
 	e.fmulS(13, 13, 11)
+	e.shl4s(10, 10, 5)
+	e.addv4s(10, 10)
+	e.scvtf4s(10, 10)
+	e.fmlsLane(0, 10, 13, 0)
+	e.addv4s(1, 1)
 	e.scvtf4s(1, 1)
 	e.fmlaLane(0, 1, 13, 0)
 	w("\tADD\t$%d, R3, R3", q6_KBlockBytes)

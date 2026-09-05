@@ -93,6 +93,7 @@ q4kblk:
 	WORD $0x1ee241ad // fcvt s13, h13
 	WORD $0x1e2b098c // fmul s12, s12, s11
 	WORD $0x1e2b09ad // fmul s13, s13, s11
+	WORD $0x4eb1b94a // addv s10, v10.4s
 	WORD $0x4e21d94a // scvtf v10.4s, v10.4s
 	WORD $0x4f8c5140 // fmls v0.4s, v10.4s, v12.s[0]
 	WORD $0x4f000401 // movi v1.4s, #0
@@ -168,6 +169,7 @@ q4kblk:
 	WORD $0x4e9997bf // sdot v31.4s, v29.16b, v25.16b
 	WORD $0x6f850bc1 // mla v1.4s, v30.4s, v5.s[2]
 	WORD $0x6fa50be1 // mla v1.4s, v31.4s, v5.s[3]
+	WORD $0x4eb1b821 // addv s1, v1.4s
 	WORD $0x4e21d821 // scvtf v1.4s, v1.4s
 	WORD $0x4f8d1020 // fmla v0.4s, v1.4s, v13.s[0]
 	ADD	$144, R3, R3

@@ -48,6 +48,10 @@ func (e *a64Q) and16(d, n, m int) {
 	e.word(0x4E201C00|lane3(d, n, m), fmt.Sprintf("and v%d.16b, v%d.16b, v%d.16b", d, n, m))
 }
 
+func (e *a64Q) eor16(d, n, m int) {
+	e.word(0x6E201C00|lane3(d, n, m), fmt.Sprintf("eor v%d.16b, v%d.16b, v%d.16b", d, n, m))
+}
+
 func (e *a64Q) orr16(d, n, m int) {
 	e.word(0x4EA01C00|lane3(d, n, m), fmt.Sprintf("orr v%d.16b, v%d.16b, v%d.16b", d, n, m))
 }
@@ -125,6 +129,14 @@ func (e *a64Q) sshll2_4s(d, n int) {
 
 func (e *a64Q) ushll8h(d, n int) {
 	e.word(0x2F08A400|uint32(n)<<5|uint32(d), fmt.Sprintf("ushll v%d.8h, v%d.8b, #0", d, n))
+}
+
+func (e *a64Q) faddS(d, n, m int) {
+	e.word(0x1E202800|lane3(d, n, m), fmt.Sprintf("fadd s%d, s%d, s%d", d, n, m))
+}
+
+func (e *a64Q) ushll2_8h(d, n int) {
+	e.word(0x6F08A400|uint32(n)<<5|uint32(d), fmt.Sprintf("ushll2 v%d.8h, v%d.16b, #0", d, n))
 }
 
 func (e *a64Q) ushll4s(d, n int) {
