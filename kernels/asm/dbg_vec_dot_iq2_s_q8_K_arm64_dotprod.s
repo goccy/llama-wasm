@@ -1,0 +1,1477 @@
+// dbg_vec_dot_iq2_s_q8_K: iq2_s x q8_K dot, u64 grid gathers through general registers, SDOT per 16 quants.
+	WORD $0x4f000400 // movi v0.4s, #0
+	MOVW	l0+8(FP), R1
+	LSRW	$8, R1, R1
+	MOVD	l1+16(FP), R2
+	ADD	$4, R2, R27
+	CMP	R27, R21
+	BLO	i2toob
+	ADD	R20, R2, R2
+	CBZW	R1, i2treduce
+	MOVD	l3+32(FP), R3
+	MOVD	l5+48(FP), R4
+	MOVD	$82, R26
+	MUL	R1, R26, R26
+	ADD	R3, R26, R27
+	CMP	R27, R21
+	BLO	i2toob
+	MOVD	$292, R26
+	MUL	R1, R26, R26
+	ADD	R4, R26, R27
+	CMP	R27, R21
+	BLO	i2toob
+	ADD	R20, R3, R3
+	ADD	R20, R4, R4
+	MOVD	$·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8(SB), R12
+	ADD	$8192, R12, R13
+	MOVW	$0x3E000000, R5
+	WORD $0x1e2700b1 // fmov s17, w5
+	WORD $0x3cc001b3 // ldur q19, [x13, #0]
+	WORD $0x3cc101b6 // ldur q22, [x13, #16]
+	WORD $0x3cc201b2 // ldur q18, [x13, #32]
+	WORD $0x4f00e437 // movi v23.16b, #1
+i2tblk:
+	WORD $0x4f000414 // movi v20.4s, #0
+	MOVWU	2(R3), R5
+	MOVBU	66(R3), R6
+	MOVWU	34(R3), R9
+	UBFX	$0, R5, $8, R7
+	UBFX	$0, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d02 // mov v2.d[0], x8
+	UBFX	$8, R5, $8, R7
+	UBFX	$2, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d02 // mov v2.d[1], x8
+	UBFX	$16, R5, $8, R7
+	UBFX	$4, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d03 // mov v3.d[0], x8
+	UBFX	$24, R5, $8, R7
+	UBFX	$6, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d03 // mov v3.d[1], x8
+	WORD $0x4e041d38 // mov v24.s[0], w9
+	WORD $0x4e130304 // tbl v4.16b, {v24.16b}, v19.16b
+	WORD $0x4e160305 // tbl v5.16b, {v24.16b}, v22.16b
+	WORD $0x4e328c84 // cmtst v4.16b, v4.16b, v18.16b
+	WORD $0x4e328ca5 // cmtst v5.16b, v5.16b, v18.16b
+	WORD $0x4eb71c84 // orr v4.16b, v4.16b, v23.16b
+	WORD $0x4eb71ca5 // orr v5.16b, v5.16b, v23.16b
+	WORD $0x4e249c42 // mul v2.16b, v2.16b, v4.16b
+	WORD $0x4e259c63 // mul v3.16b, v3.16b, v5.16b
+	WORD $0x3cc04086 // ldur q6, [x4, #4]
+	WORD $0x3cc14087 // ldur q7, [x4, #20]
+	WORD $0x4f00040c // movi v12.4s, #0
+	WORD $0x4e86944c // sdot v12.4s, v2.16b, v6.16b
+	WORD $0x4f00040d // movi v13.4s, #0
+	WORD $0x4e87946d // sdot v13.4s, v3.16b, v7.16b
+	MOVBU	74(R3), R7
+	ANDW	$0xf, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb59594 // mla v20.4s, v12.4s, v21.4s
+	LSRW	$4, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb595b4 // mla v20.4s, v13.4s, v21.4s
+	MOVWU	6(R3), R5
+	MOVBU	67(R3), R6
+	MOVWU	38(R3), R9
+	UBFX	$0, R5, $8, R7
+	UBFX	$0, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d02 // mov v2.d[0], x8
+	UBFX	$8, R5, $8, R7
+	UBFX	$2, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d02 // mov v2.d[1], x8
+	UBFX	$16, R5, $8, R7
+	UBFX	$4, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d03 // mov v3.d[0], x8
+	UBFX	$24, R5, $8, R7
+	UBFX	$6, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d03 // mov v3.d[1], x8
+	WORD $0x4e041d38 // mov v24.s[0], w9
+	WORD $0x4e130304 // tbl v4.16b, {v24.16b}, v19.16b
+	WORD $0x4e160305 // tbl v5.16b, {v24.16b}, v22.16b
+	WORD $0x4e328c84 // cmtst v4.16b, v4.16b, v18.16b
+	WORD $0x4e328ca5 // cmtst v5.16b, v5.16b, v18.16b
+	WORD $0x4eb71c84 // orr v4.16b, v4.16b, v23.16b
+	WORD $0x4eb71ca5 // orr v5.16b, v5.16b, v23.16b
+	WORD $0x4e249c42 // mul v2.16b, v2.16b, v4.16b
+	WORD $0x4e259c63 // mul v3.16b, v3.16b, v5.16b
+	WORD $0x3cc24086 // ldur q6, [x4, #36]
+	WORD $0x3cc34087 // ldur q7, [x4, #52]
+	WORD $0x4f00040c // movi v12.4s, #0
+	WORD $0x4e86944c // sdot v12.4s, v2.16b, v6.16b
+	WORD $0x4f00040d // movi v13.4s, #0
+	WORD $0x4e87946d // sdot v13.4s, v3.16b, v7.16b
+	MOVBU	75(R3), R7
+	ANDW	$0xf, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb59594 // mla v20.4s, v12.4s, v21.4s
+	LSRW	$4, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb595b4 // mla v20.4s, v13.4s, v21.4s
+	MOVWU	10(R3), R5
+	MOVBU	68(R3), R6
+	MOVWU	42(R3), R9
+	UBFX	$0, R5, $8, R7
+	UBFX	$0, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d02 // mov v2.d[0], x8
+	UBFX	$8, R5, $8, R7
+	UBFX	$2, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d02 // mov v2.d[1], x8
+	UBFX	$16, R5, $8, R7
+	UBFX	$4, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d03 // mov v3.d[0], x8
+	UBFX	$24, R5, $8, R7
+	UBFX	$6, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d03 // mov v3.d[1], x8
+	WORD $0x4e041d38 // mov v24.s[0], w9
+	WORD $0x4e130304 // tbl v4.16b, {v24.16b}, v19.16b
+	WORD $0x4e160305 // tbl v5.16b, {v24.16b}, v22.16b
+	WORD $0x4e328c84 // cmtst v4.16b, v4.16b, v18.16b
+	WORD $0x4e328ca5 // cmtst v5.16b, v5.16b, v18.16b
+	WORD $0x4eb71c84 // orr v4.16b, v4.16b, v23.16b
+	WORD $0x4eb71ca5 // orr v5.16b, v5.16b, v23.16b
+	WORD $0x4e249c42 // mul v2.16b, v2.16b, v4.16b
+	WORD $0x4e259c63 // mul v3.16b, v3.16b, v5.16b
+	WORD $0x3cc44086 // ldur q6, [x4, #68]
+	WORD $0x3cc54087 // ldur q7, [x4, #84]
+	WORD $0x4f00040c // movi v12.4s, #0
+	WORD $0x4e86944c // sdot v12.4s, v2.16b, v6.16b
+	WORD $0x4f00040d // movi v13.4s, #0
+	WORD $0x4e87946d // sdot v13.4s, v3.16b, v7.16b
+	MOVBU	76(R3), R7
+	ANDW	$0xf, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb59594 // mla v20.4s, v12.4s, v21.4s
+	LSRW	$4, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb595b4 // mla v20.4s, v13.4s, v21.4s
+	MOVWU	14(R3), R5
+	MOVBU	69(R3), R6
+	MOVWU	46(R3), R9
+	UBFX	$0, R5, $8, R7
+	UBFX	$0, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d02 // mov v2.d[0], x8
+	UBFX	$8, R5, $8, R7
+	UBFX	$2, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d02 // mov v2.d[1], x8
+	UBFX	$16, R5, $8, R7
+	UBFX	$4, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d03 // mov v3.d[0], x8
+	UBFX	$24, R5, $8, R7
+	UBFX	$6, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d03 // mov v3.d[1], x8
+	WORD $0x4e041d38 // mov v24.s[0], w9
+	WORD $0x4e130304 // tbl v4.16b, {v24.16b}, v19.16b
+	WORD $0x4e160305 // tbl v5.16b, {v24.16b}, v22.16b
+	WORD $0x4e328c84 // cmtst v4.16b, v4.16b, v18.16b
+	WORD $0x4e328ca5 // cmtst v5.16b, v5.16b, v18.16b
+	WORD $0x4eb71c84 // orr v4.16b, v4.16b, v23.16b
+	WORD $0x4eb71ca5 // orr v5.16b, v5.16b, v23.16b
+	WORD $0x4e249c42 // mul v2.16b, v2.16b, v4.16b
+	WORD $0x4e259c63 // mul v3.16b, v3.16b, v5.16b
+	WORD $0x3cc64086 // ldur q6, [x4, #100]
+	WORD $0x3cc74087 // ldur q7, [x4, #116]
+	WORD $0x4f00040c // movi v12.4s, #0
+	WORD $0x4e86944c // sdot v12.4s, v2.16b, v6.16b
+	WORD $0x4f00040d // movi v13.4s, #0
+	WORD $0x4e87946d // sdot v13.4s, v3.16b, v7.16b
+	MOVBU	77(R3), R7
+	ANDW	$0xf, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb59594 // mla v20.4s, v12.4s, v21.4s
+	LSRW	$4, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb595b4 // mla v20.4s, v13.4s, v21.4s
+	MOVWU	18(R3), R5
+	MOVBU	70(R3), R6
+	MOVWU	50(R3), R9
+	UBFX	$0, R5, $8, R7
+	UBFX	$0, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d02 // mov v2.d[0], x8
+	UBFX	$8, R5, $8, R7
+	UBFX	$2, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d02 // mov v2.d[1], x8
+	UBFX	$16, R5, $8, R7
+	UBFX	$4, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d03 // mov v3.d[0], x8
+	UBFX	$24, R5, $8, R7
+	UBFX	$6, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d03 // mov v3.d[1], x8
+	WORD $0x4e041d38 // mov v24.s[0], w9
+	WORD $0x4e130304 // tbl v4.16b, {v24.16b}, v19.16b
+	WORD $0x4e160305 // tbl v5.16b, {v24.16b}, v22.16b
+	WORD $0x4e328c84 // cmtst v4.16b, v4.16b, v18.16b
+	WORD $0x4e328ca5 // cmtst v5.16b, v5.16b, v18.16b
+	WORD $0x4eb71c84 // orr v4.16b, v4.16b, v23.16b
+	WORD $0x4eb71ca5 // orr v5.16b, v5.16b, v23.16b
+	WORD $0x4e249c42 // mul v2.16b, v2.16b, v4.16b
+	WORD $0x4e259c63 // mul v3.16b, v3.16b, v5.16b
+	WORD $0x3cc84086 // ldur q6, [x4, #132]
+	WORD $0x3cc94087 // ldur q7, [x4, #148]
+	WORD $0x4f00040c // movi v12.4s, #0
+	WORD $0x4e86944c // sdot v12.4s, v2.16b, v6.16b
+	WORD $0x4f00040d // movi v13.4s, #0
+	WORD $0x4e87946d // sdot v13.4s, v3.16b, v7.16b
+	MOVBU	78(R3), R7
+	ANDW	$0xf, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb59594 // mla v20.4s, v12.4s, v21.4s
+	LSRW	$4, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb595b4 // mla v20.4s, v13.4s, v21.4s
+	MOVWU	22(R3), R5
+	MOVBU	71(R3), R6
+	MOVWU	54(R3), R9
+	UBFX	$0, R5, $8, R7
+	UBFX	$0, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d02 // mov v2.d[0], x8
+	UBFX	$8, R5, $8, R7
+	UBFX	$2, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d02 // mov v2.d[1], x8
+	UBFX	$16, R5, $8, R7
+	UBFX	$4, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d03 // mov v3.d[0], x8
+	UBFX	$24, R5, $8, R7
+	UBFX	$6, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d03 // mov v3.d[1], x8
+	WORD $0x4e041d38 // mov v24.s[0], w9
+	WORD $0x4e130304 // tbl v4.16b, {v24.16b}, v19.16b
+	WORD $0x4e160305 // tbl v5.16b, {v24.16b}, v22.16b
+	WORD $0x4e328c84 // cmtst v4.16b, v4.16b, v18.16b
+	WORD $0x4e328ca5 // cmtst v5.16b, v5.16b, v18.16b
+	WORD $0x4eb71c84 // orr v4.16b, v4.16b, v23.16b
+	WORD $0x4eb71ca5 // orr v5.16b, v5.16b, v23.16b
+	WORD $0x4e249c42 // mul v2.16b, v2.16b, v4.16b
+	WORD $0x4e259c63 // mul v3.16b, v3.16b, v5.16b
+	WORD $0x3cca4086 // ldur q6, [x4, #164]
+	WORD $0x3ccb4087 // ldur q7, [x4, #180]
+	WORD $0x4f00040c // movi v12.4s, #0
+	WORD $0x4e86944c // sdot v12.4s, v2.16b, v6.16b
+	WORD $0x4f00040d // movi v13.4s, #0
+	WORD $0x4e87946d // sdot v13.4s, v3.16b, v7.16b
+	MOVBU	79(R3), R7
+	ANDW	$0xf, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb59594 // mla v20.4s, v12.4s, v21.4s
+	LSRW	$4, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb595b4 // mla v20.4s, v13.4s, v21.4s
+	MOVWU	26(R3), R5
+	MOVBU	72(R3), R6
+	MOVWU	58(R3), R9
+	UBFX	$0, R5, $8, R7
+	UBFX	$0, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d02 // mov v2.d[0], x8
+	UBFX	$8, R5, $8, R7
+	UBFX	$2, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d02 // mov v2.d[1], x8
+	UBFX	$16, R5, $8, R7
+	UBFX	$4, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d03 // mov v3.d[0], x8
+	UBFX	$24, R5, $8, R7
+	UBFX	$6, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d03 // mov v3.d[1], x8
+	WORD $0x4e041d38 // mov v24.s[0], w9
+	WORD $0x4e130304 // tbl v4.16b, {v24.16b}, v19.16b
+	WORD $0x4e160305 // tbl v5.16b, {v24.16b}, v22.16b
+	WORD $0x4e328c84 // cmtst v4.16b, v4.16b, v18.16b
+	WORD $0x4e328ca5 // cmtst v5.16b, v5.16b, v18.16b
+	WORD $0x4eb71c84 // orr v4.16b, v4.16b, v23.16b
+	WORD $0x4eb71ca5 // orr v5.16b, v5.16b, v23.16b
+	WORD $0x4e249c42 // mul v2.16b, v2.16b, v4.16b
+	WORD $0x4e259c63 // mul v3.16b, v3.16b, v5.16b
+	WORD $0x3ccc4086 // ldur q6, [x4, #196]
+	WORD $0x3ccd4087 // ldur q7, [x4, #212]
+	WORD $0x4f00040c // movi v12.4s, #0
+	WORD $0x4e86944c // sdot v12.4s, v2.16b, v6.16b
+	WORD $0x4f00040d // movi v13.4s, #0
+	WORD $0x4e87946d // sdot v13.4s, v3.16b, v7.16b
+	MOVBU	80(R3), R7
+	ANDW	$0xf, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb59594 // mla v20.4s, v12.4s, v21.4s
+	LSRW	$4, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb595b4 // mla v20.4s, v13.4s, v21.4s
+	MOVWU	30(R3), R5
+	MOVBU	73(R3), R6
+	MOVWU	62(R3), R9
+	UBFX	$0, R5, $8, R7
+	UBFX	$0, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d02 // mov v2.d[0], x8
+	UBFX	$8, R5, $8, R7
+	UBFX	$2, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d02 // mov v2.d[1], x8
+	UBFX	$16, R5, $8, R7
+	UBFX	$4, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e081d03 // mov v3.d[0], x8
+	UBFX	$24, R5, $8, R7
+	UBFX	$6, R6, $2, R8
+	ORR	R8<<8, R7, R7
+	MOVD	(R12)(R7<<3), R8
+	WORD $0x4e181d03 // mov v3.d[1], x8
+	WORD $0x4e041d38 // mov v24.s[0], w9
+	WORD $0x4e130304 // tbl v4.16b, {v24.16b}, v19.16b
+	WORD $0x4e160305 // tbl v5.16b, {v24.16b}, v22.16b
+	WORD $0x4e328c84 // cmtst v4.16b, v4.16b, v18.16b
+	WORD $0x4e328ca5 // cmtst v5.16b, v5.16b, v18.16b
+	WORD $0x4eb71c84 // orr v4.16b, v4.16b, v23.16b
+	WORD $0x4eb71ca5 // orr v5.16b, v5.16b, v23.16b
+	WORD $0x4e249c42 // mul v2.16b, v2.16b, v4.16b
+	WORD $0x4e259c63 // mul v3.16b, v3.16b, v5.16b
+	WORD $0x3cce4086 // ldur q6, [x4, #228]
+	WORD $0x3ccf4087 // ldur q7, [x4, #244]
+	WORD $0x4f00040c // movi v12.4s, #0
+	WORD $0x4e86944c // sdot v12.4s, v2.16b, v6.16b
+	WORD $0x4f00040d // movi v13.4s, #0
+	WORD $0x4e87946d // sdot v13.4s, v3.16b, v7.16b
+	MOVBU	81(R3), R7
+	ANDW	$0xf, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb59594 // mla v20.4s, v12.4s, v21.4s
+	LSRW	$4, R7, R8
+	LSLW	$1, R8, R8
+	ADDW	$1, R8, R8
+	WORD $0x4e040d15 // dup v21.4s, w8
+	WORD $0x4eb595b4 // mla v20.4s, v13.4s, v21.4s
+	WORD $0x4eb1ba94 // addv s20, v20.4s
+	WORD $0x4e21da94 // scvtf v20.4s, v20.4s
+	WORD $0x7c400079 // ldur h25, [x3, #0]
+	WORD $0xbc40009a // ldur s26, [x4, #0]
+	WORD $0x1ee24339 // fcvt s25, h25
+	WORD $0x1e3a0b39 // fmul s25, s25, s26
+	WORD $0x1e310b39 // fmul s25, s25, s17
+	WORD $0x4f991280 // fmla v0.4s, v20.4s, v25.s[0]
+	ADD	$82, R3, R3
+	ADD	$292, R4, R4
+	SUBW	$1, R1, R1
+	CBNZW	R1, i2tblk
+i2treduce:
+	WORD $0x6e20d400 // faddp v0.4s, v0.4s, v0.4s
+	WORD $0x7e30d800 // faddp s0, v0.2s
+	FMOVS	F0, (R2)
+	RET
+i2toob:
+	B	ovr_oob
+
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+0(SB)/8, $0x808080808080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8(SB)/8, $0x80808080808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+16(SB)/8, $0x808080808081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+24(SB)/8, $0x808080808082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+32(SB)/8, $0x808080808082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+40(SB)/8, $0x808080808190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+48(SB)/8, $0x808080808191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+56(SB)/8, $0x80808080819192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+64(SB)/8, $0x808080808192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+72(SB)/8, $0x8080808082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+80(SB)/8, $0x8080808082b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+88(SB)/8, $0x8080808082b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+96(SB)/8, $0x8080808082b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+104(SB)/8, $0x808080819080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+112(SB)/8, $0x808080819081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+120(SB)/8, $0x80808081908192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+128(SB)/8, $0x808080819082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+136(SB)/8, $0x808080819190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+144(SB)/8, $0x80808081919082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+152(SB)/8, $0x808080819191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+160(SB)/8, $0x808080819192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+168(SB)/8, $0x8080808192b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+176(SB)/8, $0x8080808192b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+184(SB)/8, $0x8080808192b192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+192(SB)/8, $0x8080808192b2b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+200(SB)/8, $0x80808082b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+208(SB)/8, $0x80808082b08082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+216(SB)/8, $0x80808082b081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+224(SB)/8, $0x80808082b082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+232(SB)/8, $0x80808082b190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+240(SB)/8, $0x80808082b191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+248(SB)/8, $0x80808082b2b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+256(SB)/8, $0x80808082b2b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+264(SB)/8, $0x80808082b2b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+272(SB)/8, $0x808081908080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+280(SB)/8, $0x808081908081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+288(SB)/8, $0x80808190808192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+296(SB)/8, $0x808081908082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+304(SB)/8, $0x808081908190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+312(SB)/8, $0x80808190819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+320(SB)/8, $0x808081908191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+328(SB)/8, $0x808081908192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+336(SB)/8, $0x8080819082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+344(SB)/8, $0x8080819082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+352(SB)/8, $0x808081919080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+360(SB)/8, $0x80808191908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+368(SB)/8, $0x808081919081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+376(SB)/8, $0x808081919082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+384(SB)/8, $0x808081919190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+392(SB)/8, $0x808081919191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+400(SB)/8, $0x80808191919192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+408(SB)/8, $0x808081919192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+416(SB)/8, $0x8080819192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+424(SB)/8, $0x8080819192b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+432(SB)/8, $0x8080819192b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+440(SB)/8, $0x80808192b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+448(SB)/8, $0x80808192b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+456(SB)/8, $0x80808192b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+464(SB)/8, $0x80808192b19082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+472(SB)/8, $0x80808192b191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+480(SB)/8, $0x80808192b2b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+488(SB)/8, $0x80808192b2b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+496(SB)/8, $0x808082b08080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+504(SB)/8, $0x808082b0808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+512(SB)/8, $0x808082b08081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+520(SB)/8, $0x808082b08082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+528(SB)/8, $0x808082b08190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+536(SB)/8, $0x808082b08191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+544(SB)/8, $0x808082b082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+552(SB)/8, $0x808082b082b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+560(SB)/8, $0x808082b19080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+568(SB)/8, $0x808082b19081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+576(SB)/8, $0x808082b1908192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+584(SB)/8, $0x808082b19082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+592(SB)/8, $0x808082b19190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+600(SB)/8, $0x808082b19191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+608(SB)/8, $0x808082b2b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+616(SB)/8, $0x808082b2b081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+624(SB)/8, $0x808082b2b082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+632(SB)/8, $0x808082b2b191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+640(SB)/8, $0x808082b2b2b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+648(SB)/8, $0x808190808080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+656(SB)/8, $0x808190808081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+664(SB)/8, $0x80819080808192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+672(SB)/8, $0x808190808082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+680(SB)/8, $0x808190808190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+688(SB)/8, $0x80819080819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+696(SB)/8, $0x808190808191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+704(SB)/8, $0x808190808192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+712(SB)/8, $0x8081908082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+720(SB)/8, $0x8081908082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+728(SB)/8, $0x8081908082b192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+736(SB)/8, $0x8081908082b2b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+744(SB)/8, $0x808190819080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+752(SB)/8, $0x80819081908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+760(SB)/8, $0x808190819081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+768(SB)/8, $0x808190819082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+776(SB)/8, $0x808190819082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+784(SB)/8, $0x808190819190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+792(SB)/8, $0x808190819191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+800(SB)/8, $0x80819081919192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+808(SB)/8, $0x808190819192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+816(SB)/8, $0x8081908192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+824(SB)/8, $0x8081908192b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+832(SB)/8, $0x8081908192b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+840(SB)/8, $0x80819082b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+848(SB)/8, $0x80819082b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+856(SB)/8, $0x80819082b08192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+864(SB)/8, $0x80819082b082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+872(SB)/8, $0x80819082b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+880(SB)/8, $0x80819082b191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+888(SB)/8, $0x80819082b192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+896(SB)/8, $0x80819082b2b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+904(SB)/8, $0x80819082b2b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+912(SB)/8, $0x808191908080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+920(SB)/8, $0x80819190808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+928(SB)/8, $0x808191908081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+936(SB)/8, $0x808191908082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+944(SB)/8, $0x808191908082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+952(SB)/8, $0x808191908190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+960(SB)/8, $0x808191908191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+968(SB)/8, $0x80819190819192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+976(SB)/8, $0x808191908192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+984(SB)/8, $0x8081919082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+992(SB)/8, $0x8081919082b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1000(SB)/8, $0x8081919082b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1008(SB)/8, $0x808191919080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1016(SB)/8, $0x808191919081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1024(SB)/8, $0x80819191908192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1032(SB)/8, $0x808191919082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1040(SB)/8, $0x808191919190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1048(SB)/8, $0x80819191919082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1056(SB)/8, $0x808191919191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1064(SB)/8, $0x808191919192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1072(SB)/8, $0x8081919192b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1080(SB)/8, $0x8081919192b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1088(SB)/8, $0x80819192b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1096(SB)/8, $0x80819192b08082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1104(SB)/8, $0x80819192b081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1112(SB)/8, $0x80819192b082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1120(SB)/8, $0x80819192b190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1128(SB)/8, $0x80819192b191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1136(SB)/8, $0x80819192b2b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1144(SB)/8, $0x808192b08080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1152(SB)/8, $0x808192b08081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1160(SB)/8, $0x808192b0808192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1168(SB)/8, $0x808192b08082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1176(SB)/8, $0x808192b08190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1184(SB)/8, $0x808192b08191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1192(SB)/8, $0x808192b19080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1200(SB)/8, $0x808192b19081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1208(SB)/8, $0x808192b19082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1216(SB)/8, $0x808192b19190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1224(SB)/8, $0x808192b19191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1232(SB)/8, $0x808192b192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1240(SB)/8, $0x808192b2b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1248(SB)/8, $0x808192b2b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1256(SB)/8, $0x808192b2b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1264(SB)/8, $0x8082b0808080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1272(SB)/8, $0x8082b080808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1280(SB)/8, $0x8082b0808081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1288(SB)/8, $0x8082b0808082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1296(SB)/8, $0x8082b0808190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1304(SB)/8, $0x8082b0808191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1312(SB)/8, $0x8082b080819192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1320(SB)/8, $0x8082b0808192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1328(SB)/8, $0x8082b08082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1336(SB)/8, $0x8082b08082b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1344(SB)/8, $0x8082b08082b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1352(SB)/8, $0x8082b0819080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1360(SB)/8, $0x8082b0819081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1368(SB)/8, $0x8082b081908192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1376(SB)/8, $0x8082b0819082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1384(SB)/8, $0x8082b0819190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1392(SB)/8, $0x8082b081919082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1400(SB)/8, $0x8082b0819191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1408(SB)/8, $0x8082b0819192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1416(SB)/8, $0x8082b08192b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1424(SB)/8, $0x8082b08192b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1432(SB)/8, $0x8082b082b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1440(SB)/8, $0x8082b082b081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1448(SB)/8, $0x8082b082b191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1456(SB)/8, $0x8082b082b2b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1464(SB)/8, $0x8082b1908080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1472(SB)/8, $0x8082b1908081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1480(SB)/8, $0x8082b1908190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1488(SB)/8, $0x8082b190819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1496(SB)/8, $0x8082b1908191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1504(SB)/8, $0x8082b1908192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1512(SB)/8, $0x8082b19082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1520(SB)/8, $0x8082b1919080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1528(SB)/8, $0x8082b1919081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1536(SB)/8, $0x8082b1919082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1544(SB)/8, $0x8082b1919190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1552(SB)/8, $0x8082b1919191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1560(SB)/8, $0x8082b19192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1568(SB)/8, $0x8082b192b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1576(SB)/8, $0x8082b192b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1584(SB)/8, $0x8082b2b08080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1592(SB)/8, $0x8082b2b08190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1600(SB)/8, $0x8082b2b08191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1608(SB)/8, $0x8082b2b082b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1616(SB)/8, $0x8082b2b082b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1624(SB)/8, $0x8082b2b082b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1632(SB)/8, $0x8082b2b19190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1640(SB)/8, $0x8082b2b2b192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1648(SB)/8, $0x819080808080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1656(SB)/8, $0x819080808081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1664(SB)/8, $0x81908080808192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1672(SB)/8, $0x819080808082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1680(SB)/8, $0x819080808190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1688(SB)/8, $0x81908080819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1696(SB)/8, $0x819080808191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1704(SB)/8, $0x819080808192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1712(SB)/8, $0x8190808082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1720(SB)/8, $0x8190808082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1728(SB)/8, $0x8190808082b192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1736(SB)/8, $0x819080819080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1744(SB)/8, $0x81908081908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1752(SB)/8, $0x819080819081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1760(SB)/8, $0x819080819082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1768(SB)/8, $0x819080819190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1776(SB)/8, $0x819080819191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1784(SB)/8, $0x81908081919192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1792(SB)/8, $0x819080819192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1800(SB)/8, $0x8190808192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1808(SB)/8, $0x8190808192b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1816(SB)/8, $0x8190808192b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1824(SB)/8, $0x8190808192b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1832(SB)/8, $0x81908082b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1840(SB)/8, $0x81908082b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1848(SB)/8, $0x81908082b08192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1856(SB)/8, $0x81908082b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1864(SB)/8, $0x81908082b191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1872(SB)/8, $0x81908082b192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1880(SB)/8, $0x81908082b2b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1888(SB)/8, $0x81908082b2b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1896(SB)/8, $0x819081908080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1904(SB)/8, $0x81908190808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1912(SB)/8, $0x819081908081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1920(SB)/8, $0x819081908082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1928(SB)/8, $0x819081908082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1936(SB)/8, $0x819081908190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1944(SB)/8, $0x819081908191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1952(SB)/8, $0x81908190819192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1960(SB)/8, $0x819081908192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1968(SB)/8, $0x8190819082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1976(SB)/8, $0x8190819082b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1984(SB)/8, $0x8190819082b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+1992(SB)/8, $0x8190819082b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2000(SB)/8, $0x819081919080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2008(SB)/8, $0x819081919081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2016(SB)/8, $0x81908191908192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2024(SB)/8, $0x819081919082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2032(SB)/8, $0x819081919190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2040(SB)/8, $0x81908191919082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2048(SB)/8, $0x819081919191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2056(SB)/8, $0x819081919192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2064(SB)/8, $0x8190819192b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2072(SB)/8, $0x8190819192b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2080(SB)/8, $0x81908192b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2088(SB)/8, $0x81908192b08082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2096(SB)/8, $0x81908192b081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2104(SB)/8, $0x81908192b082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2112(SB)/8, $0x81908192b190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2120(SB)/8, $0x81908192b191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2128(SB)/8, $0x819082b08080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2136(SB)/8, $0x819082b08081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2144(SB)/8, $0x819082b08082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2152(SB)/8, $0x819082b08190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2160(SB)/8, $0x819082b08191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2168(SB)/8, $0x819082b082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2176(SB)/8, $0x819082b082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2184(SB)/8, $0x819082b19080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2192(SB)/8, $0x819082b19081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2200(SB)/8, $0x819082b19190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2208(SB)/8, $0x819082b19191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2216(SB)/8, $0x819082b2b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2224(SB)/8, $0x819082b2b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2232(SB)/8, $0x819082b2b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2240(SB)/8, $0x819190808080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2248(SB)/8, $0x81919080808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2256(SB)/8, $0x819190808081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2264(SB)/8, $0x819190808082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2272(SB)/8, $0x819190808190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2280(SB)/8, $0x819190808191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2288(SB)/8, $0x81919080819192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2296(SB)/8, $0x819190808192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2304(SB)/8, $0x8191908082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2312(SB)/8, $0x8191908082b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2320(SB)/8, $0x8191908082b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2328(SB)/8, $0x819190819080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2336(SB)/8, $0x819190819081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2344(SB)/8, $0x81919081908192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2352(SB)/8, $0x819190819082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2360(SB)/8, $0x819190819190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2368(SB)/8, $0x81919081919082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2376(SB)/8, $0x819190819191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2384(SB)/8, $0x819190819192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2392(SB)/8, $0x8191908192b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2400(SB)/8, $0x8191908192b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2408(SB)/8, $0x81919082b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2416(SB)/8, $0x81919082b08082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2424(SB)/8, $0x81919082b081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2432(SB)/8, $0x81919082b082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2440(SB)/8, $0x81919082b190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2448(SB)/8, $0x81919082b191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2456(SB)/8, $0x81919082b2b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2464(SB)/8, $0x819191908080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2472(SB)/8, $0x819191908081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2480(SB)/8, $0x81919190808192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2488(SB)/8, $0x819191908082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2496(SB)/8, $0x819191908190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2504(SB)/8, $0x81919190819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2512(SB)/8, $0x819191908191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2520(SB)/8, $0x819191908192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2528(SB)/8, $0x8191919082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2536(SB)/8, $0x8191919082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2544(SB)/8, $0x819191919080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2552(SB)/8, $0x81919191908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2560(SB)/8, $0x819191919081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2568(SB)/8, $0x819191919082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2576(SB)/8, $0x819191919190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2584(SB)/8, $0x819191919191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2592(SB)/8, $0x8191919192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2600(SB)/8, $0x81919192b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2608(SB)/8, $0x81919192b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2616(SB)/8, $0x81919192b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2624(SB)/8, $0x819192b08080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2632(SB)/8, $0x819192b08081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2640(SB)/8, $0x819192b08082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2648(SB)/8, $0x819192b08190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2656(SB)/8, $0x819192b08191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2664(SB)/8, $0x819192b082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2672(SB)/8, $0x819192b19080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2680(SB)/8, $0x819192b19081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2688(SB)/8, $0x819192b19190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2696(SB)/8, $0x819192b2b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2704(SB)/8, $0x819192b2b2b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2712(SB)/8, $0x8192b0808080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2720(SB)/8, $0x8192b0808081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2728(SB)/8, $0x8192b080808192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2736(SB)/8, $0x8192b0808082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2744(SB)/8, $0x8192b0808190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2752(SB)/8, $0x8192b0808191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2760(SB)/8, $0x8192b0808192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2768(SB)/8, $0x8192b08082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2776(SB)/8, $0x8192b0819080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2784(SB)/8, $0x8192b081908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2792(SB)/8, $0x8192b0819081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2800(SB)/8, $0x8192b0819082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2808(SB)/8, $0x8192b0819190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2816(SB)/8, $0x8192b0819191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2824(SB)/8, $0x8192b08192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2832(SB)/8, $0x8192b082b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2840(SB)/8, $0x8192b082b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2848(SB)/8, $0x8192b1908080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2856(SB)/8, $0x8192b190808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2864(SB)/8, $0x8192b1908081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2872(SB)/8, $0x8192b1908082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2880(SB)/8, $0x8192b1908190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2888(SB)/8, $0x8192b1908191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2896(SB)/8, $0x8192b19082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2904(SB)/8, $0x8192b1919080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2912(SB)/8, $0x8192b1919081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2920(SB)/8, $0x8192b1919190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2928(SB)/8, $0x8192b19192b2b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2936(SB)/8, $0x8192b192b2b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2944(SB)/8, $0x8192b2b08081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2952(SB)/8, $0x8192b2b08190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2960(SB)/8, $0x8192b2b19080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2968(SB)/8, $0x8192b2b1919192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2976(SB)/8, $0x82b080808080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2984(SB)/8, $0x82b08080808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+2992(SB)/8, $0x82b080808081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3000(SB)/8, $0x82b080808082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3008(SB)/8, $0x82b080808190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3016(SB)/8, $0x82b080808191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3024(SB)/8, $0x82b08080819192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3032(SB)/8, $0x82b080808192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3040(SB)/8, $0x82b0808082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3048(SB)/8, $0x82b0808082b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3056(SB)/8, $0x82b0808082b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3064(SB)/8, $0x82b080819080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3072(SB)/8, $0x82b080819081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3080(SB)/8, $0x82b080819190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3088(SB)/8, $0x82b08081919082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3096(SB)/8, $0x82b080819191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3104(SB)/8, $0x82b0808192b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3112(SB)/8, $0x82b08082b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3120(SB)/8, $0x82b08082b082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3128(SB)/8, $0x82b08082b191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3136(SB)/8, $0x82b08082b2b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3144(SB)/8, $0x82b081908080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3152(SB)/8, $0x82b081908081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3160(SB)/8, $0x82b081908190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3168(SB)/8, $0x82b08190819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3176(SB)/8, $0x82b081908191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3184(SB)/8, $0x82b0819082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3192(SB)/8, $0x82b081919080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3200(SB)/8, $0x82b08191908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3208(SB)/8, $0x82b081919081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3216(SB)/8, $0x82b081919190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3224(SB)/8, $0x82b081919191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3232(SB)/8, $0x82b0819192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3240(SB)/8, $0x82b08192b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3248(SB)/8, $0x82b08192b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3256(SB)/8, $0x82b08192b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3264(SB)/8, $0x82b082b08080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3272(SB)/8, $0x82b082b08082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3280(SB)/8, $0x82b082b082b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3288(SB)/8, $0x82b082b082b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3296(SB)/8, $0x82b082b082b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3304(SB)/8, $0x82b082b19081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3312(SB)/8, $0x82b082b19190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3320(SB)/8, $0x82b082b2b082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3328(SB)/8, $0x82b082b2b082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3336(SB)/8, $0x82b082b2b2b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3344(SB)/8, $0x82b190808080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3352(SB)/8, $0x82b190808081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3360(SB)/8, $0x82b19080808192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3368(SB)/8, $0x82b190808082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3376(SB)/8, $0x82b190808190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3384(SB)/8, $0x82b190808191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3392(SB)/8, $0x82b190808192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3400(SB)/8, $0x82b1908082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3408(SB)/8, $0x82b1908082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3416(SB)/8, $0x82b190819080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3424(SB)/8, $0x82b19081908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3432(SB)/8, $0x82b190819081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3440(SB)/8, $0x82b190819082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3448(SB)/8, $0x82b190819190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3456(SB)/8, $0x82b190819191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3464(SB)/8, $0x82b1908192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3472(SB)/8, $0x82b19082b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3480(SB)/8, $0x82b19082b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3488(SB)/8, $0x82b19082b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3496(SB)/8, $0x82b191908080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3504(SB)/8, $0x82b191908081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3512(SB)/8, $0x82b191908082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3520(SB)/8, $0x82b191908190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3528(SB)/8, $0x82b191908191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3536(SB)/8, $0x82b1919082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3544(SB)/8, $0x82b191919080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3552(SB)/8, $0x82b191919081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3560(SB)/8, $0x82b191919190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3568(SB)/8, $0x82b1919192b192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3576(SB)/8, $0x82b19192b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3584(SB)/8, $0x82b192b08080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3592(SB)/8, $0x82b192b08081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3600(SB)/8, $0x82b192b08190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3608(SB)/8, $0x82b192b19080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3616(SB)/8, $0x82b192b19192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3624(SB)/8, $0x82b2b0808080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3632(SB)/8, $0x82b2b0808081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3640(SB)/8, $0x82b2b0808190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3648(SB)/8, $0x82b2b0808191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3656(SB)/8, $0x82b2b0819080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3664(SB)/8, $0x82b2b0819081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3672(SB)/8, $0x82b2b0819190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3680(SB)/8, $0x82b2b082b082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3688(SB)/8, $0x82b2b082b2b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3696(SB)/8, $0x82b2b1908080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3704(SB)/8, $0x82b2b1908081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3712(SB)/8, $0x82b2b1908190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3720(SB)/8, $0x82b2b192b191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3728(SB)/8, $0x82b2b2b08082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3736(SB)/8, $0x82b2b2b082b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3744(SB)/8, $0x82b2b2b192b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3752(SB)/8, $0x82b2b2b2b082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3760(SB)/8, $0x82b2b2b2b082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3768(SB)/8, $0x1908080808080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3776(SB)/8, $0x1908080808081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3784(SB)/8, $0x190808080808192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3792(SB)/8, $0x1908080808082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3800(SB)/8, $0x1908080808190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3808(SB)/8, $0x190808080819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3816(SB)/8, $0x1908080808191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3824(SB)/8, $0x1908080808192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3832(SB)/8, $0x1908080808192b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3840(SB)/8, $0x19080808082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3848(SB)/8, $0x19080808082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3856(SB)/8, $0x19080808082b192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3864(SB)/8, $0x1908080819080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3872(SB)/8, $0x190808081908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3880(SB)/8, $0x1908080819081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3888(SB)/8, $0x1908080819082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3896(SB)/8, $0x1908080819082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3904(SB)/8, $0x1908080819190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3912(SB)/8, $0x1908080819191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3920(SB)/8, $0x190808081919192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3928(SB)/8, $0x1908080819192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3936(SB)/8, $0x19080808192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3944(SB)/8, $0x19080808192b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3952(SB)/8, $0x19080808192b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3960(SB)/8, $0x190808082b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3968(SB)/8, $0x190808082b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3976(SB)/8, $0x190808082b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3984(SB)/8, $0x190808082b191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+3992(SB)/8, $0x190808082b192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4000(SB)/8, $0x190808082b2b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4008(SB)/8, $0x190808082b2b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4016(SB)/8, $0x1908081908080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4024(SB)/8, $0x190808190808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4032(SB)/8, $0x1908081908081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4040(SB)/8, $0x1908081908082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4048(SB)/8, $0x1908081908190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4056(SB)/8, $0x1908081908191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4064(SB)/8, $0x190808190819192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4072(SB)/8, $0x1908081908192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4080(SB)/8, $0x19080819082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4088(SB)/8, $0x19080819082b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4096(SB)/8, $0x19080819082b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4104(SB)/8, $0x1908081919080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4112(SB)/8, $0x1908081919081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4120(SB)/8, $0x190808191908192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4128(SB)/8, $0x1908081919082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4136(SB)/8, $0x1908081919190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4144(SB)/8, $0x190808191919082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4152(SB)/8, $0x1908081919191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4160(SB)/8, $0x1908081919192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4168(SB)/8, $0x19080819192b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4176(SB)/8, $0x19080819192b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4184(SB)/8, $0x190808192b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4192(SB)/8, $0x190808192b08082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4200(SB)/8, $0x190808192b081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4208(SB)/8, $0x190808192b082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4216(SB)/8, $0x190808192b190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4224(SB)/8, $0x190808192b191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4232(SB)/8, $0x190808192b2b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4240(SB)/8, $0x1908082b08080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4248(SB)/8, $0x1908082b08081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4256(SB)/8, $0x1908082b08190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4264(SB)/8, $0x1908082b0819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4272(SB)/8, $0x1908082b08191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4280(SB)/8, $0x1908082b08192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4288(SB)/8, $0x1908082b082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4296(SB)/8, $0x1908082b19080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4304(SB)/8, $0x1908082b19081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4312(SB)/8, $0x1908082b19082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4320(SB)/8, $0x1908082b19190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4328(SB)/8, $0x1908082b19191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4336(SB)/8, $0x1908082b192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4344(SB)/8, $0x1908082b2b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4352(SB)/8, $0x1908082b2b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4360(SB)/8, $0x1908190808080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4368(SB)/8, $0x190819080808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4376(SB)/8, $0x1908190808081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4384(SB)/8, $0x1908190808082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4392(SB)/8, $0x1908190808082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4400(SB)/8, $0x1908190808190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4408(SB)/8, $0x1908190808191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4416(SB)/8, $0x190819080819192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4424(SB)/8, $0x1908190808192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4432(SB)/8, $0x19081908082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4440(SB)/8, $0x19081908082b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4448(SB)/8, $0x19081908082b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4456(SB)/8, $0x19081908082b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4464(SB)/8, $0x1908190819080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4472(SB)/8, $0x1908190819081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4480(SB)/8, $0x190819081908192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4488(SB)/8, $0x1908190819082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4496(SB)/8, $0x1908190819190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4504(SB)/8, $0x190819081919082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4512(SB)/8, $0x1908190819191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4520(SB)/8, $0x1908190819192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4528(SB)/8, $0x19081908192b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4536(SB)/8, $0x19081908192b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4544(SB)/8, $0x190819082b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4552(SB)/8, $0x190819082b08082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4560(SB)/8, $0x190819082b081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4568(SB)/8, $0x190819082b082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4576(SB)/8, $0x190819082b190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4584(SB)/8, $0x190819082b191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4592(SB)/8, $0x190819082b2b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4600(SB)/8, $0x1908191908080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4608(SB)/8, $0x1908191908081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4616(SB)/8, $0x190819190808192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4624(SB)/8, $0x1908191908082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4632(SB)/8, $0x1908191908190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4640(SB)/8, $0x190819190819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4648(SB)/8, $0x1908191908191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4656(SB)/8, $0x1908191908192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4664(SB)/8, $0x19081919082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4672(SB)/8, $0x19081919082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4680(SB)/8, $0x1908191919080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4688(SB)/8, $0x190819191908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4696(SB)/8, $0x1908191919081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4704(SB)/8, $0x1908191919082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4712(SB)/8, $0x1908191919190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4720(SB)/8, $0x1908191919191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4728(SB)/8, $0x19081919192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4736(SB)/8, $0x19081919192b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4744(SB)/8, $0x190819192b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4752(SB)/8, $0x190819192b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4760(SB)/8, $0x190819192b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4768(SB)/8, $0x1908192b08080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4776(SB)/8, $0x1908192b0808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4784(SB)/8, $0x1908192b08081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4792(SB)/8, $0x1908192b08082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4800(SB)/8, $0x1908192b08190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4808(SB)/8, $0x1908192b08191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4816(SB)/8, $0x1908192b082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4824(SB)/8, $0x1908192b19080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4832(SB)/8, $0x1908192b19081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4840(SB)/8, $0x1908192b19190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4848(SB)/8, $0x1908192b2b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4856(SB)/8, $0x1908192b2b2b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4864(SB)/8, $0x19082b0808080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4872(SB)/8, $0x19082b0808081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4880(SB)/8, $0x19082b0808082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4888(SB)/8, $0x19082b0808190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4896(SB)/8, $0x19082b080819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4904(SB)/8, $0x19082b0808191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4912(SB)/8, $0x19082b0808192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4920(SB)/8, $0x19082b08082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4928(SB)/8, $0x19082b08082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4936(SB)/8, $0x19082b0819080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4944(SB)/8, $0x19082b081908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4952(SB)/8, $0x19082b0819081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4960(SB)/8, $0x19082b0819082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4968(SB)/8, $0x19082b0819190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4976(SB)/8, $0x19082b0819191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4984(SB)/8, $0x19082b08192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+4992(SB)/8, $0x19082b082b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5000(SB)/8, $0x19082b082b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5008(SB)/8, $0x19082b1908080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5016(SB)/8, $0x19082b190808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5024(SB)/8, $0x19082b1908081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5032(SB)/8, $0x19082b1908082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5040(SB)/8, $0x19082b1908190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5048(SB)/8, $0x19082b1908191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5056(SB)/8, $0x19082b19082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5064(SB)/8, $0x19082b1919080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5072(SB)/8, $0x19082b1919081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5080(SB)/8, $0x19082b1919190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5088(SB)/8, $0x19082b192b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5096(SB)/8, $0x19082b192b19192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5104(SB)/8, $0x19082b2b08080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5112(SB)/8, $0x19082b2b08081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5120(SB)/8, $0x19082b2b08190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5128(SB)/8, $0x19082b2b19080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5136(SB)/8, $0x1919080808080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5144(SB)/8, $0x191908080808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5152(SB)/8, $0x1919080808081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5160(SB)/8, $0x1919080808082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5168(SB)/8, $0x1919080808190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5176(SB)/8, $0x1919080808191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5184(SB)/8, $0x191908080819192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5192(SB)/8, $0x1919080808192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5200(SB)/8, $0x19190808082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5208(SB)/8, $0x19190808082b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5216(SB)/8, $0x19190808082b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5224(SB)/8, $0x19190808082b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5232(SB)/8, $0x1919080819080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5240(SB)/8, $0x1919080819081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5248(SB)/8, $0x191908081908192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5256(SB)/8, $0x1919080819082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5264(SB)/8, $0x1919080819190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5272(SB)/8, $0x191908081919082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5280(SB)/8, $0x1919080819191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5288(SB)/8, $0x1919080819192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5296(SB)/8, $0x19190808192b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5304(SB)/8, $0x19190808192b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5312(SB)/8, $0x191908082b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5320(SB)/8, $0x191908082b08082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5328(SB)/8, $0x191908082b081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5336(SB)/8, $0x191908082b082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5344(SB)/8, $0x191908082b190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5352(SB)/8, $0x191908082b191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5360(SB)/8, $0x1919081908080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5368(SB)/8, $0x1919081908081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5376(SB)/8, $0x191908190808192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5384(SB)/8, $0x1919081908082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5392(SB)/8, $0x1919081908190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5400(SB)/8, $0x191908190819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5408(SB)/8, $0x1919081908191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5416(SB)/8, $0x1919081908192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5424(SB)/8, $0x19190819082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5432(SB)/8, $0x19190819082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5440(SB)/8, $0x1919081919080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5448(SB)/8, $0x191908191908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5456(SB)/8, $0x1919081919081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5464(SB)/8, $0x1919081919082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5472(SB)/8, $0x1919081919190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5480(SB)/8, $0x1919081919191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5488(SB)/8, $0x19190819192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5496(SB)/8, $0x191908192b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5504(SB)/8, $0x191908192b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5512(SB)/8, $0x191908192b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5520(SB)/8, $0x1919082b08080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5528(SB)/8, $0x1919082b08081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5536(SB)/8, $0x1919082b08082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5544(SB)/8, $0x1919082b08190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5552(SB)/8, $0x1919082b08191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5560(SB)/8, $0x1919082b082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5568(SB)/8, $0x1919082b19080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5576(SB)/8, $0x1919082b19081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5584(SB)/8, $0x1919082b19190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5592(SB)/8, $0x1919082b192b2b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5600(SB)/8, $0x1919082b2b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5608(SB)/8, $0x1919190808080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5616(SB)/8, $0x1919190808081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5624(SB)/8, $0x191919080808192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5632(SB)/8, $0x1919190808082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5640(SB)/8, $0x1919190808190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5648(SB)/8, $0x191919080819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5656(SB)/8, $0x1919190808191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5664(SB)/8, $0x1919190808192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5672(SB)/8, $0x19191908082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5680(SB)/8, $0x19191908082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5688(SB)/8, $0x1919190819080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5696(SB)/8, $0x191919081908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5704(SB)/8, $0x1919190819081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5712(SB)/8, $0x1919190819082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5720(SB)/8, $0x1919190819190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5728(SB)/8, $0x1919190819191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5736(SB)/8, $0x19191908192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5744(SB)/8, $0x191919082b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5752(SB)/8, $0x191919082b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5760(SB)/8, $0x191919082b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5768(SB)/8, $0x1919191908080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5776(SB)/8, $0x191919190808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5784(SB)/8, $0x1919191908081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5792(SB)/8, $0x1919191908082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5800(SB)/8, $0x1919191908190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5808(SB)/8, $0x1919191908191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5816(SB)/8, $0x19191919082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5824(SB)/8, $0x1919191919080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5832(SB)/8, $0x1919191919081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5840(SB)/8, $0x1919191919190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5848(SB)/8, $0x191919192b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5856(SB)/8, $0x1919192b08080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5864(SB)/8, $0x1919192b08081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5872(SB)/8, $0x1919192b08190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5880(SB)/8, $0x1919192b082b192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5888(SB)/8, $0x1919192b19080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5896(SB)/8, $0x19192b0808080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5904(SB)/8, $0x19192b080808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5912(SB)/8, $0x19192b0808081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5920(SB)/8, $0x19192b0808082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5928(SB)/8, $0x19192b0808190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5936(SB)/8, $0x19192b0808191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5944(SB)/8, $0x19192b08082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5952(SB)/8, $0x19192b0819080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5960(SB)/8, $0x19192b0819081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5968(SB)/8, $0x19192b0819190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5976(SB)/8, $0x19192b0819192b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5984(SB)/8, $0x19192b082b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+5992(SB)/8, $0x19192b1908080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6000(SB)/8, $0x19192b1908081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6008(SB)/8, $0x19192b1908190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6016(SB)/8, $0x19192b1919080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6024(SB)/8, $0x19192b2b08080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6032(SB)/8, $0x19192b2b08192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6040(SB)/8, $0x19192b2b2b081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6048(SB)/8, $0x19192b2b2b2b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6056(SB)/8, $0x192b080808080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6064(SB)/8, $0x192b080808081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6072(SB)/8, $0x192b08080808192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6080(SB)/8, $0x192b080808190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6088(SB)/8, $0x192b08080819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6096(SB)/8, $0x192b080808191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6104(SB)/8, $0x192b080808192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6112(SB)/8, $0x192b0808082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6120(SB)/8, $0x192b0808082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6128(SB)/8, $0x192b080819080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6136(SB)/8, $0x192b080819081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6144(SB)/8, $0x192b080819082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6152(SB)/8, $0x192b080819190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6160(SB)/8, $0x192b080819191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6168(SB)/8, $0x192b0808192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6176(SB)/8, $0x192b08082b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6184(SB)/8, $0x192b08082b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6192(SB)/8, $0x192b081908080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6200(SB)/8, $0x192b08190808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6208(SB)/8, $0x192b081908081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6216(SB)/8, $0x192b081908082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6224(SB)/8, $0x192b081908190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6232(SB)/8, $0x192b081908191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6240(SB)/8, $0x192b0819082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6248(SB)/8, $0x192b081919080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6256(SB)/8, $0x192b081919081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6264(SB)/8, $0x192b081919190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6272(SB)/8, $0x192b08192b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6280(SB)/8, $0x192b08192b192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6288(SB)/8, $0x192b082b08081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6296(SB)/8, $0x192b082b08190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6304(SB)/8, $0x192b082b19080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6312(SB)/8, $0x192b082b1919192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6320(SB)/8, $0x192b082b2b2b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6328(SB)/8, $0x192b190808080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6336(SB)/8, $0x192b190808081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6344(SB)/8, $0x192b190808082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6352(SB)/8, $0x192b190808190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6360(SB)/8, $0x192b190808191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6368(SB)/8, $0x192b1908082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6376(SB)/8, $0x192b190819080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6384(SB)/8, $0x192b190819081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6392(SB)/8, $0x192b190819190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6400(SB)/8, $0x192b19082b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6408(SB)/8, $0x192b191908080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6416(SB)/8, $0x192b191908081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6424(SB)/8, $0x192b191908190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6432(SB)/8, $0x192b191919080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6440(SB)/8, $0x192b191919082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6448(SB)/8, $0x192b1919192b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6456(SB)/8, $0x192b19192b19082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6464(SB)/8, $0x192b192b08080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6472(SB)/8, $0x192b192b2b191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6480(SB)/8, $0x192b2b0808080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6488(SB)/8, $0x192b2b0808081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6496(SB)/8, $0x192b2b0808190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6504(SB)/8, $0x192b2b08192b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6512(SB)/8, $0x192b2b082b192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6520(SB)/8, $0x192b2b1908080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6528(SB)/8, $0x192b2b19082b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6536(SB)/8, $0x192b2b2b1908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6544(SB)/8, $0x192b2b2b2b2b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6552(SB)/8, $0x2b08080808080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6560(SB)/8, $0x2b0808080808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6568(SB)/8, $0x2b08080808081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6576(SB)/8, $0x2b08080808082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6584(SB)/8, $0x2b08080808190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6592(SB)/8, $0x2b08080808191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6600(SB)/8, $0x2b08080808192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6608(SB)/8, $0x2b080808082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6616(SB)/8, $0x2b080808082b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6624(SB)/8, $0x2b08080819080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6632(SB)/8, $0x2b08080819081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6640(SB)/8, $0x2b08080819190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6648(SB)/8, $0x2b0808081919082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6656(SB)/8, $0x2b08080819191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6664(SB)/8, $0x2b08080819192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6672(SB)/8, $0x2b080808192b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6680(SB)/8, $0x2b0808082b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6688(SB)/8, $0x2b0808082b081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6696(SB)/8, $0x2b0808082b190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6704(SB)/8, $0x2b0808082b191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6712(SB)/8, $0x2b08081908080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6720(SB)/8, $0x2b08081908081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6728(SB)/8, $0x2b08081908082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6736(SB)/8, $0x2b08081908190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6744(SB)/8, $0x2b0808190819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6752(SB)/8, $0x2b08081908191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6760(SB)/8, $0x2b08081908192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6768(SB)/8, $0x2b080819082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6776(SB)/8, $0x2b080819082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6784(SB)/8, $0x2b08081919080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6792(SB)/8, $0x2b0808191908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6800(SB)/8, $0x2b08081919081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6808(SB)/8, $0x2b08081919082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6816(SB)/8, $0x2b08081919190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6824(SB)/8, $0x2b08081919191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6832(SB)/8, $0x2b0808192b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6840(SB)/8, $0x2b0808192b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6848(SB)/8, $0x2b0808192b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6856(SB)/8, $0x2b0808192b2b2b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6864(SB)/8, $0x2b08082b08080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6872(SB)/8, $0x2b08082b08081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6880(SB)/8, $0x2b08082b08082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6888(SB)/8, $0x2b08082b08190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6896(SB)/8, $0x2b08082b08191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6904(SB)/8, $0x2b08082b19080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6912(SB)/8, $0x2b08082b19081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6920(SB)/8, $0x2b08082b19190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6928(SB)/8, $0x2b08190808080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6936(SB)/8, $0x2b08190808081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6944(SB)/8, $0x2b0819080808192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6952(SB)/8, $0x2b08190808082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6960(SB)/8, $0x2b08190808190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6968(SB)/8, $0x2b0819080819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6976(SB)/8, $0x2b08190808191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6984(SB)/8, $0x2b08190808192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+6992(SB)/8, $0x2b081908082b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7000(SB)/8, $0x2b08190819080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7008(SB)/8, $0x2b0819081908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7016(SB)/8, $0x2b08190819081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7024(SB)/8, $0x2b08190819082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7032(SB)/8, $0x2b08190819190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7040(SB)/8, $0x2b08190819191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7048(SB)/8, $0x2b081908192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7056(SB)/8, $0x2b0819082b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7064(SB)/8, $0x2b0819082b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7072(SB)/8, $0x2b0819082b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7080(SB)/8, $0x2b08191908080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7088(SB)/8, $0x2b0819190808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7096(SB)/8, $0x2b08191908081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7104(SB)/8, $0x2b08191908082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7112(SB)/8, $0x2b08191908190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7120(SB)/8, $0x2b08191908191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7128(SB)/8, $0x2b081919082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7136(SB)/8, $0x2b08191919080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7144(SB)/8, $0x2b08191919081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7152(SB)/8, $0x2b08191919190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7160(SB)/8, $0x2b0819192b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7168(SB)/8, $0x2b0819192b082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7176(SB)/8, $0x2b08192b08080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7184(SB)/8, $0x2b08192b08081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7192(SB)/8, $0x2b08192b08190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7200(SB)/8, $0x2b08192b082b2b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7208(SB)/8, $0x2b08192b19080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7216(SB)/8, $0x2b082b0808080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7224(SB)/8, $0x2b082b0808081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7232(SB)/8, $0x2b082b0808190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7240(SB)/8, $0x2b082b0808191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7248(SB)/8, $0x2b082b0819080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7256(SB)/8, $0x2b082b0819081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7264(SB)/8, $0x2b082b0819190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7272(SB)/8, $0x2b082b082b2b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7280(SB)/8, $0x2b082b1908080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7288(SB)/8, $0x2b082b1908081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7296(SB)/8, $0x2b082b1919080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7304(SB)/8, $0x2b082b19192b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7312(SB)/8, $0x2b082b2b082b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7320(SB)/8, $0x2b082b2b19192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7328(SB)/8, $0x2b082b2b19192b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7336(SB)/8, $0x2b082b2b2b08082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7344(SB)/8, $0x2b082b2b2b2b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7352(SB)/8, $0x2b19080808080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7360(SB)/8, $0x2b19080808081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7368(SB)/8, $0x2b19080808082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7376(SB)/8, $0x2b19080808190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7384(SB)/8, $0x2b1908080819082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7392(SB)/8, $0x2b19080808191919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7400(SB)/8, $0x2b19080808192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7408(SB)/8, $0x2b190808082b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7416(SB)/8, $0x2b19080819080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7424(SB)/8, $0x2b1908081908082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7432(SB)/8, $0x2b19080819081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7440(SB)/8, $0x2b19080819082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7448(SB)/8, $0x2b19080819190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7456(SB)/8, $0x2b19080819191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7464(SB)/8, $0x2b190808192b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7472(SB)/8, $0x2b1908082b080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7480(SB)/8, $0x2b1908082b081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7488(SB)/8, $0x2b1908082b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7496(SB)/8, $0x2b19081908080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7504(SB)/8, $0x2b19081908081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7512(SB)/8, $0x2b19081908190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7520(SB)/8, $0x2b19081908191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7528(SB)/8, $0x2b19081919080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7536(SB)/8, $0x2b19081919081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7544(SB)/8, $0x2b19081919190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7552(SB)/8, $0x2b19081919192b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7560(SB)/8, $0x2b19082b08080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7568(SB)/8, $0x2b19082b08081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7576(SB)/8, $0x2b19082b08190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7584(SB)/8, $0x2b19082b19080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7592(SB)/8, $0x2b19082b2b2b192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7600(SB)/8, $0x2b19190808080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7608(SB)/8, $0x2b1919080808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7616(SB)/8, $0x2b19190808081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7624(SB)/8, $0x2b19190808082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7632(SB)/8, $0x2b19190808190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7640(SB)/8, $0x2b19190808191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7648(SB)/8, $0x2b191908082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7656(SB)/8, $0x2b19190819080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7664(SB)/8, $0x2b19190819081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7672(SB)/8, $0x2b19190819190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7680(SB)/8, $0x2b1919082b080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7688(SB)/8, $0x2b1919082b19192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7696(SB)/8, $0x2b19191908080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7704(SB)/8, $0x2b19191908081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7712(SB)/8, $0x2b19191908190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7720(SB)/8, $0x2b19191919080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7728(SB)/8, $0x2b1919192b192b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7736(SB)/8, $0x2b1919192b2b0819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7744(SB)/8, $0x2b19192b08080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7752(SB)/8, $0x2b19192b1908192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7760(SB)/8, $0x2b19192b192b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7768(SB)/8, $0x2b192b0808080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7776(SB)/8, $0x2b192b0808081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7784(SB)/8, $0x2b192b0808190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7792(SB)/8, $0x2b192b08082b192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7800(SB)/8, $0x2b192b0819080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7808(SB)/8, $0x2b192b082b2b2b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7816(SB)/8, $0x2b192b1908080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7824(SB)/8, $0x2b192b1919082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7832(SB)/8, $0x2b192b191919082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7840(SB)/8, $0x2b192b2b2b190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7848(SB)/8, $0x2b2b080808080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7856(SB)/8, $0x2b2b080808081919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7864(SB)/8, $0x2b2b080808082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7872(SB)/8, $0x2b2b080808191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7880(SB)/8, $0x2b2b0808082b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7888(SB)/8, $0x2b2b0808082b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7896(SB)/8, $0x2b2b080819080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7904(SB)/8, $0x2b2b080819081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7912(SB)/8, $0x2b2b080819190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7920(SB)/8, $0x2b2b08082b2b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7928(SB)/8, $0x2b2b08082b2b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7936(SB)/8, $0x2b2b081919080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7944(SB)/8, $0x2b2b0819192b1919
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7952(SB)/8, $0x2b2b082b0808082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7960(SB)/8, $0x2b2b082b08082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7968(SB)/8, $0x2b2b082b082b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7976(SB)/8, $0x2b2b082b082b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7984(SB)/8, $0x2b2b082b082b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+7992(SB)/8, $0x2b2b082b2b08082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8000(SB)/8, $0x2b2b082b2b082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8008(SB)/8, $0x2b2b082b2b082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8016(SB)/8, $0x2b2b082b2b2b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8024(SB)/8, $0x2b2b190808080819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8032(SB)/8, $0x2b2b190808081908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8040(SB)/8, $0x2b2b190808190808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8048(SB)/8, $0x2b2b190819080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8056(SB)/8, $0x2b2b19082b082b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8064(SB)/8, $0x2b2b19082b2b1908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8072(SB)/8, $0x2b2b191908080808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8080(SB)/8, $0x2b2b191908192b19
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8088(SB)/8, $0x2b2b192b19190819
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8096(SB)/8, $0x2b2b2b0808082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8104(SB)/8, $0x2b2b2b08082b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8112(SB)/8, $0x2b2b2b082b2b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8120(SB)/8, $0x2b2b2b1919191908
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8128(SB)/8, $0x2b2b2b192b08192b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8136(SB)/8, $0x2b2b2b2b08082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8144(SB)/8, $0x2b2b2b2b08082b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8152(SB)/8, $0x2b2b2b2b082b0808
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8160(SB)/8, $0x2b2b2b2b082b082b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8168(SB)/8, $0x2b2b2b2b082b2b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8176(SB)/8, $0x2b2b2b2b2b082b08
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8184(SB)/8, $0x2b2b2b2b2b2b2b2b
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8192(SB)/8, $0x0
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8200(SB)/8, $0x101010101010101
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8208(SB)/8, $0x202020202020202
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8216(SB)/8, $0x303030303030303
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8224(SB)/8, $0x8040201008040201
+DATA ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8+8232(SB)/8, $0x8040201008040201
+GLOBL ·ovr_dbg_vec_dot_iq2_s_q8_K_dotprod_b8240_a5f030babeb6dda8(SB), RODATA|NOPTR, $8240

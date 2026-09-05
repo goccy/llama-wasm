@@ -27,18 +27,22 @@ func idxLH(idx int) uint32     { return uint32(idx&1)<<21 | uint32(idx>>1)<<11 }
 // --- loads and stores (unscaled immediate, -256..255).
 
 func (e *a64Q) ldurQ(rt, rn, imm int) {
+	checkLdur(imm)
 	e.word(0x3CC00000|uint32(imm&0x1FF)<<12|uint32(rn)<<5|uint32(rt), fmt.Sprintf("ldur q%d, [x%d, #%d]", rt, rn, imm))
 }
 
 func (e *a64Q) ldurD(rt, rn, imm int) {
+	checkLdur(imm)
 	e.word(0xFC400000|uint32(imm&0x1FF)<<12|uint32(rn)<<5|uint32(rt), fmt.Sprintf("ldur d%d, [x%d, #%d]", rt, rn, imm))
 }
 
 func (e *a64Q) ldurS(rt, rn, imm int) {
+	checkLdur(imm)
 	e.word(0xBC400000|uint32(imm&0x1FF)<<12|uint32(rn)<<5|uint32(rt), fmt.Sprintf("ldur s%d, [x%d, #%d]", rt, rn, imm))
 }
 
 func (e *a64Q) ldurH(rt, rn, imm int) {
+	checkLdur(imm)
 	e.word(0x7C400000|uint32(imm&0x1FF)<<12|uint32(rn)<<5|uint32(rt), fmt.Sprintf("ldur h%d, [x%d, #%d]", rt, rn, imm))
 }
 
@@ -174,6 +178,63 @@ func (e *a64Q) addv4s(d, n int) {
 }
 
 // --- scalar / element moves.
+
+// dup4sW broadcasts the low 32 bits of a general register into four lanes.
+// ushl4s shifts each 32-bit lane of n left by the (signed) shift in the
+// matching lane of m.
+func (e *a64Q) ushl4s(d, n, m int) {
+	e.word(0x6EA04400|lane3(d, n, m), fmt.Sprintf("ushl v%d.4s, v%d.4s, v%d.4s", d, n, m))
+}
+
+// cmhs4s sets each 32-bit lane to all ones where n >= m (unsigned).
+func (e *a64Q) cmhs4s(d, n, m int) {
+	e.word(0x6EA03C00|lane3(d, n, m), fmt.Sprintf("cmhs v%d.4s, v%d.4s, v%d.4s", d, n, m))
+}
+
+// bsl16 selects n where d is set and m where it is clear.
+func (e *a64Q) bsl16(d, n, m int) {
+	e.word(0x6E601C00|lane3(d, n, m), fmt.Sprintf("bsl v%d.16b, v%d.16b, v%d.16b", d, n, m))
+}
+
+// insSW writes the low 32 bits of a general register into lane idx of d.
+func (e *a64Q) insSW(d, idx, n int) {
+	e.word(0x4E001C00|uint32(idx<<3|4)<<16|uint32(n)<<5|uint32(d), fmt.Sprintf("mov v%d.s[%d], w%d", d, idx, n))
+}
+
+// insDX writes a general register into 64-bit lane idx of d.
+func (e *a64Q) insDX(d, idx, n int) {
+	e.word(0x4E001C00|uint32(idx<<4|8)<<16|uint32(n)<<5|uint32(d), fmt.Sprintf("mov v%d.d[%d], x%d", d, idx, n))
+}
+
+// mul16 multiplies the 16 byte lanes of n and m (low 8 bits of each product).
+func (e *a64Q) mul16(d, n, m int) {
+	e.word(0x4E209C00|lane3(d, n, m), fmt.Sprintf("mul v%d.16b, v%d.16b, v%d.16b", d, n, m))
+}
+
+// cmhs16 sets each byte lane to all ones where n >= m (unsigned).
+func (e *a64Q) cmhs16(d, n, m int) {
+	e.word(0x6E203C00|lane3(d, n, m), fmt.Sprintf("cmhs v%d.16b, v%d.16b, v%d.16b", d, n, m))
+}
+
+// add16 adds the 16 byte lanes.
+func (e *a64Q) add16(d, n, m int) {
+	e.word(0x4E208400|lane3(d, n, m), fmt.Sprintf("add v%d.16b, v%d.16b, v%d.16b", d, n, m))
+}
+
+// mvn16 inverts every bit.
+func (e *a64Q) mvn16(d, n int) {
+	e.word(0x6E205800|uint32(n)<<5|uint32(d), fmt.Sprintf("mvn v%d.16b, v%d.16b", d, n))
+}
+
+// ushl16 shifts each byte lane of n left by the signed shift in the
+// matching lane of m (negative shifts right).
+func (e *a64Q) ushl16(d, n, m int) {
+	e.word(0x6E204400|lane3(d, n, m), fmt.Sprintf("ushl v%d.16b, v%d.16b, v%d.16b", d, n, m))
+}
+
+func (e *a64Q) dup4sW(d, n int) {
+	e.word(0x4E040C00|uint32(n)<<5|uint32(d), fmt.Sprintf("dup v%d.4s, w%d", d, n))
+}
 
 func (e *a64Q) dup16W(d, n int) {
 	e.word(0x4E010C00|uint32(n)<<5|uint32(d), fmt.Sprintf("dup v%d.16b, w%d", d, n))
@@ -316,4 +377,13 @@ func (e *a64Q) shl4s(d, n, imm int) {
 
 func (e *a64Q) sub4s(d, n, m int) {
 	e.word(0x6EA08400|lane3(d, n, m), fmt.Sprintf("sub v%d.4s, v%d.4s, v%d.4s", d, n, m))
+}
+
+// checkLdur panics on an immediate the unscaled load/store forms cannot
+// encode (a 9-bit signed byte offset): the encoders mask the field, so an
+// out-of-range offset would silently address the wrong bytes.
+func checkLdur(imm int) {
+	if imm < -256 || imm > 255 {
+		panic(fmt.Sprintf("ldur/stur immediate %d out of range [-256, 255]", imm))
+	}
 }

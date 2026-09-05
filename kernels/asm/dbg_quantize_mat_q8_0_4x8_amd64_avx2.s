@@ -26,12 +26,12 @@ q8mrow:
 	VMOVUPS	32(R9), Y1
 	VMOVUPS	64(R9), Y2
 	VMOVUPS	96(R9), Y3
-	VANDPS	·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_ffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7f(SB), Y0, Y4
-	VANDPS	·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_ffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7f(SB), Y1, Y5
+	VANDPS	·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_2270a8180ede3e7f(SB), Y0, Y4
+	VANDPS	·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_2270a8180ede3e7f(SB), Y1, Y5
 	VMAXPS	Y5, Y4, Y4
-	VANDPS	·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_ffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7f(SB), Y2, Y5
+	VANDPS	·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_2270a8180ede3e7f(SB), Y2, Y5
 	VMAXPS	Y5, Y4, Y4
-	VANDPS	·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_ffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7f(SB), Y3, Y5
+	VANDPS	·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_2270a8180ede3e7f(SB), Y3, Y5
 	VMAXPS	Y5, Y4, Y4
 	VEXTRACTF128	$1, Y4, X5
 	VMAXPS	X5, X4, X4
@@ -39,10 +39,10 @@ q8mrow:
 	VMAXPS	X5, X4, X4
 	VPERMILPS	$0xb1, X4, X5
 	VMAXPS	X5, X4, X4
-	VDIVSS	·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_0000fe420000fe420000fe420000fe420000fe420000fe420000fe420000fe42(SB), X4, X5
+	VDIVSS	·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_7c61a84935c2c389(SB), X4, X5
 	VUCOMISS	X9, X4
 	JEQ	q8mzero
-	VMOVSS	·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f(SB), X6
+	VMOVSS	·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_4f05df05f8da9356(SB), X6
 	VDIVSS	X5, X6, X8
 	JMP	q8mscale
 q8mzero:
@@ -92,18 +92,18 @@ q8moob:
 	VZEROUPPER
 	JMP	ovr_oob
 
-DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f+0(SB)/8, $0x3f8000003f800000
-DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f+8(SB)/8, $0x3f8000003f800000
-DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f+16(SB)/8, $0x3f8000003f800000
-DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f+24(SB)/8, $0x3f8000003f800000
-GLOBL ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_0000803f0000803f0000803f0000803f0000803f0000803f0000803f0000803f(SB), RODATA|NOPTR, $32
-DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_0000fe420000fe420000fe420000fe420000fe420000fe420000fe420000fe42+0(SB)/8, $0x42fe000042fe0000
-DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_0000fe420000fe420000fe420000fe420000fe420000fe420000fe420000fe42+8(SB)/8, $0x42fe000042fe0000
-DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_0000fe420000fe420000fe420000fe420000fe420000fe420000fe420000fe42+16(SB)/8, $0x42fe000042fe0000
-DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_0000fe420000fe420000fe420000fe420000fe420000fe420000fe420000fe42+24(SB)/8, $0x42fe000042fe0000
-GLOBL ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_0000fe420000fe420000fe420000fe420000fe420000fe420000fe420000fe42(SB), RODATA|NOPTR, $32
-DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_ffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7f+0(SB)/8, $0x7fffffff7fffffff
-DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_ffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7f+8(SB)/8, $0x7fffffff7fffffff
-DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_ffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7f+16(SB)/8, $0x7fffffff7fffffff
-DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_ffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7f+24(SB)/8, $0x7fffffff7fffffff
-GLOBL ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_ffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7fffffff7f(SB), RODATA|NOPTR, $32
+DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_2270a8180ede3e7f+0(SB)/8, $0x7fffffff7fffffff
+DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_2270a8180ede3e7f+8(SB)/8, $0x7fffffff7fffffff
+DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_2270a8180ede3e7f+16(SB)/8, $0x7fffffff7fffffff
+DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_2270a8180ede3e7f+24(SB)/8, $0x7fffffff7fffffff
+GLOBL ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_2270a8180ede3e7f(SB), RODATA|NOPTR, $32
+DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_4f05df05f8da9356+0(SB)/8, $0x3f8000003f800000
+DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_4f05df05f8da9356+8(SB)/8, $0x3f8000003f800000
+DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_4f05df05f8da9356+16(SB)/8, $0x3f8000003f800000
+DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_4f05df05f8da9356+24(SB)/8, $0x3f8000003f800000
+GLOBL ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_4f05df05f8da9356(SB), RODATA|NOPTR, $32
+DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_7c61a84935c2c389+0(SB)/8, $0x42fe000042fe0000
+DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_7c61a84935c2c389+8(SB)/8, $0x42fe000042fe0000
+DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_7c61a84935c2c389+16(SB)/8, $0x42fe000042fe0000
+DATA ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_7c61a84935c2c389+24(SB)/8, $0x42fe000042fe0000
+GLOBL ·ovr_dbg_quantize_mat_q8_0_4x8_avx2_b32_7c61a84935c2c389(SB), RODATA|NOPTR, $32
