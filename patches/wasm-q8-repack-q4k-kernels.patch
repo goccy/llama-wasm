@@ -1,0 +1,49 @@
+diff --git a/ggml/src/ggml-cpu/repack.cpp b/ggml/src/ggml-cpu/repack.cpp
+index f8b05cc..32287a5 100644
+--- a/ggml/src/ggml-cpu/repack.cpp
++++ b/ggml/src/ggml-cpu/repack.cpp
+@@ -955,6 +955,14 @@ void ggml_gemv_q4_K_8x4_q8_K_generic(int n, float * GGML_RESTRICT s, size_t bs,
+     }
+ }
+ 
++#if defined(__wasm_simd128__)
++// On wasm this generic body IS the kernel (arch-fallback.h names it
++// ggml_gem*_q4_K_8x8_q8_K); exported out of line under a dbg_* name so a
++// wasm-to-native transpiler can substitute a native body. The export
++// must carry the body itself: a forwarding wrapper gets inlined into
++// the repack driver by the wasm optimizer and the export goes unused.
++__attribute__((noinline, export_name("dbg_gemv_q4_K_8x8")))
++#endif
+ void ggml_gemv_q4_K_8x8_q8_K_generic(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+     const int qk = QK_K;
+     const int nb = n / qk;
+@@ -1902,6 +1910,14 @@ void ggml_gemm_q4_K_8x4_q8_K_generic(int n, float * GGML_RESTRICT s, size_t bs,
+     }
+ }
+ 
++#if defined(__wasm_simd128__)
++// On wasm this generic body IS the kernel (arch-fallback.h names it
++// ggml_gem*_q4_K_8x8_q8_K); exported out of line under a dbg_* name so a
++// wasm-to-native transpiler can substitute a native body. The export
++// must carry the body itself: a forwarding wrapper gets inlined into
++// the repack driver by the wasm optimizer and the export goes unused.
++__attribute__((noinline, export_name("dbg_gemm_q4_K_8x8")))
++#endif
+ void ggml_gemm_q4_K_8x8_q8_K_generic(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+     const int qk = QK_K;
+     const int nb = n / qk;
+@@ -4603,6 +4619,14 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
+                 return &q4_K_8x8_q8_K;
+             }
+         }
++#if defined(__wasm_simd128__)
++        // The wasm build exports the q4_K 8x8 GEMV/GEMM under dbg_* names
++        // for a wasm-to-native transpiler to substitute native bodies
++        // (see arch/wasm/repack.cpp), the way the q8_0 4x4 pair works.
++        if (cur->ne[1] % 8 == 0) {
++            return &q4_K_8x8_q8_K;
++        }
++#endif
+         if (ggml_cpu_has_neon() && ggml_cpu_has_matmul_int8()) {
+             if (cur->ne[1] % 8 == 0) {
+                 return &q4_K_8x8_q8_K;

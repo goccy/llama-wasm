@@ -101,6 +101,86 @@ func Overrides() *Manifest {
 				},
 			},
 			{
+				Export: "dbg_flash_attn_kv_f16",
+				Params: []string{"i64"},
+				Bodies: []Body{
+					body("dbg_flash_attn_kv_f16", "arm64", "neon", 16, func(sym string, p *ConstPool) string { return a64FlashAttnKernel(sym, p, wide) }),
+					body("dbg_flash_attn_kv_f16", "amd64", "avx2", x64FAFrame, func(sym string, p *ConstPool) string { return x64FlashAttnKernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_quantize_mat_q8_K_4x8",
+				Params: []string{"i64", "i64", "i64"},
+				Bodies: []Body{
+					body("dbg_quantize_mat_q8_K_4x8", "arm64", "neon", 16, func(sym string, _ *ConstPool) string { return a64QuantizeMatQ8K4x8Kernel(sym, wide) }),
+					body("dbg_quantize_mat_q8_K_4x8", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64QuantizeMatQ8K4x8Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_quantize_mat_q8_0_4x8",
+				Params: []string{"i64", "i64", "i64"},
+				Bodies: []Body{
+					body("dbg_quantize_mat_q8_0_4x8", "arm64", "neon", 16, func(sym string, _ *ConstPool) string { return a64QuantizeMatQ8_0_4x8Kernel(sym, wide) }),
+					body("dbg_quantize_mat_q8_0_4x8", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64QuantizeMatQ8_0_4x8Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_gemv_q5_0_8x8",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i32", "i32"},
+				Bodies: []Body{
+					body("dbg_gemv_q5_0_8x8", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64GemvQ5_0_8x8Kernel(sym, p, wide) }),
+					body("dbg_gemv_q5_0_8x8", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64GemvQ5_0_8x8Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_gemm_q5_0_8x8",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i32", "i32"},
+				Bodies: []Body{
+					body("dbg_gemm_q5_0_8x8", "arm64", "i8mm", a64GemmQ5Frame, func(sym string, p *ConstPool) string { return a64GemmQ5_0_8x8Kernel(sym, p, wide) }),
+					body("dbg_gemm_q5_0_8x8", "amd64", "avx2", x64GemmQ5Frame, func(sym string, p *ConstPool) string { return x64GemmQ5_0_8x8Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_gemv_q4_K_8x8",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i32", "i32"},
+				Bodies: []Body{
+					body("dbg_gemv_q4_K_8x8", "arm64", "dotprod", 16, func(sym string, _ *ConstPool) string { return a64GemvQ4K8x8Kernel(sym, wide) }),
+					body("dbg_gemv_q4_K_8x8", "amd64", "avx2", x64Q4KFrame, func(sym string, p *ConstPool) string { return x64GemvQ4K8x8Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_gemm_q4_K_8x8",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i32", "i32"},
+				Bodies: []Body{
+					body("dbg_gemm_q4_K_8x8", "arm64", "i8mm", a64GemmQ4KFrame, func(sym string, _ *ConstPool) string { return a64GemmQ4K8x8Kernel(sym, wide) }),
+					body("dbg_gemm_q4_K_8x8", "amd64", "avx2", x64Q4KTileFrame, func(sym string, p *ConstPool) string { return x64GemmQ4K8x8Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_q5_0_q8_0",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_q5_0_q8_0", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotQ5_0Kernel(sym, p, wide) }),
+					body("dbg_vec_dot_q5_0_q8_0", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotQ5_0Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_q4_K_q8_K",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_q4_K_q8_K", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotQ4_KKernel(sym, p, wide) }),
+					body("dbg_vec_dot_q4_K_q8_K", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotQ4_KKernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_q6_K_q8_K",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_q6_K_q8_K", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotQ6_KKernel(sym, p, wide) }),
+					body("dbg_vec_dot_q6_K_q8_K", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotQ6_KKernel(sym, p, wide) }),
+				},
+			},
+			{
 				Export: "dbg_vec_mad_f16_f32",
 				Params: []string{"i32", "i64", "i64", "f32"},
 				Bodies: []Body{

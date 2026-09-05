@@ -14,6 +14,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -57,6 +58,47 @@ var registry = map[string]verification{
 	"wasm-q8-quantize-round-nearest.patch": {
 		reason: "verified by go-llama's native-parity and prompt batch-invariance tests against the released bundle",
 	},
+	// The K-quant / q5_0 vec_dot exports are structural: the export
+	// names must be present in the binary for wasm2go's assembly
+	// overrides (kernels/) to attach; a module without them silently
+	// runs the transpiled bodies instead.
+	"wasm-kquant-vec-dot-kernels.patch": {
+		verify: hasExports("dbg_vec_dot_q5_0_q8_0", "dbg_vec_dot_q4_K_q8_K", "dbg_vec_dot_q6_K_q8_K"),
+	},
+	// The flash-attention KV loop export is structural in the same way.
+	"wasm-flash-attn-kv-loop-export.patch": {
+		verify: hasExports("dbg_flash_attn_kv_f16"),
+	},
+	// The Q4_K 8x8 repack GEMV/GEMM exports (applied after the q8_0 repack
+	// patch that creates arch/wasm/repack.cpp).
+	"wasm-q8-repack-q4k-kernels.patch": {
+		verify: hasExports("dbg_gemv_q4_K_8x8", "dbg_gemm_q4_K_8x8"),
+	},
+	// The q8_Kx4 activation quantizer export (the repack GEMM's input).
+	"wasm-q8k-quantize-mat-export.patch": {
+		verify: hasExports("dbg_quantize_mat_q8_K_4x8"),
+	},
+	// The Q5_0 8x8 repack (block_q5_0x8, its GEMV/GEMM and the q8_0x4
+	// activation quantizer the GEMM consumes).
+	"wasm-q8-repack-q5-0-kernels.patch": {
+		verify: hasExports("dbg_gemv_q5_0_8x8", "dbg_gemm_q5_0_8x8", "dbg_quantize_mat_q8_0_4x8"),
+	},
+}
+
+// hasExports checks that every name appears in the module's export
+// section. Export names are stored as length-prefixed UTF-8 in the
+// binary, so a missing byte string is a missing export; a present one
+// is accepted without decoding the section (nothing else in the module
+// carries a dbg_-prefixed name).
+func hasExports(names ...string) func([]byte) error {
+	return func(wasm []byte) error {
+		for _, n := range names {
+			if !bytes.Contains(wasm, []byte(n)) {
+				return fmt.Errorf("export %q not found in the module", n)
+			}
+		}
+		return nil
+	}
 }
 
 func run() error {

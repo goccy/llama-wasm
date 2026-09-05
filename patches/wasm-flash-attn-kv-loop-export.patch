@@ -1,0 +1,120 @@
+--- a/ggml/src/ggml-cpu/ops.cpp
++++ b/ggml/src/ggml-cpu/ops.cpp
+@@ -8462,8 +8462,82 @@
+             {
+                 GGML_ABORT("fatal error");
+             }
++    }
++}
++
++#if defined(__wasm_simd128__)
++// The single-query KV loop of flash attention for F16 K and V without a
++// logit softcap, out of line and exported so a wasm-to-native transpiler
++// can substitute a native body (the dbg_* convention of the q8_0 repack
++// GEMM): the loop is the whole decode step at long contexts and the
++// transpiled form pays two calls and a libm expf per position. Runs
++// positions [ic_start, ic_end) of one query against K/V rows
++// k_base + ic*nbk1 / v_base + ic*nbv1 with the F16 query Q_q, the optional
++// F16 mask row mp (slope applied, -inf skips the position), updating the
++// online-softmax state SM[0] = S, SM[1] = M and the f32 accumulator VKQ32
++// (DV floats) in place. The arguments travel in one struct so the export
++// keeps a single-pointer signature (a native body reads the fields at
++// fixed offsets; the layout below is the wasm64 one, 96 bytes).
++struct ggml_flash_attn_kv_f16_args {
++    // Addresses and sizes are carried as 64-bit fields whatever the pointer
++    // width, so the layout is the same under wasm32 and wasm64 (the
++    // priming build is wasm32, the shipped module wasm64).
++    uint64_t Q_q;      // 0   const ggml_fp16_t *
++    uint64_t k_base;   // 8   const char *
++    uint64_t nbk1;     // 16
++    uint64_t v_base;   // 24  const char *
++    uint64_t nbv1;     // 32
++    uint64_t mp;       // 40  const ggml_fp16_t *, 0 when there is no mask
++    uint64_t SM;       // 48  float *
++    uint64_t VKQ32;    // 56  float *
++    int64_t  ic_start; // 64
++    int64_t  ic_end;   // 72
++    float    slope;    // 80
++    float    scale;    // 84
++    int32_t  DK;       // 88
++    int32_t  DV;       // 92
++};
++static_assert(sizeof(struct ggml_flash_attn_kv_f16_args) == 96, "flash-attn kv args layout");
++
++__attribute__((noinline, export_name("dbg_flash_attn_kv_f16")))
++void ggml_flash_attn_kv_f16(const struct ggml_flash_attn_kv_f16_args * a) {
++    const int DK = a->DK;
++    const int DV = a->DV;
++    const ggml_fp16_t * Q_q = (const ggml_fp16_t *) (uintptr_t) a->Q_q;
++    const char * k_base = (const char *) (uintptr_t) a->k_base;
++    const char * v_base = (const char *) (uintptr_t) a->v_base;
++    const ggml_fp16_t * mp = (const ggml_fp16_t *) (uintptr_t) a->mp;
++    float * SM = (float *) (uintptr_t) a->SM;
++    float * VKQ32 = (float *) (uintptr_t) a->VKQ32;
++    const size_t nbk1 = (size_t) a->nbk1;
++    const size_t nbv1 = (size_t) a->nbv1;
++    float S = SM[0];
++    float M = SM[1];
++    for (int64_t ic = a->ic_start; ic < a->ic_end; ++ic) {
++        const float mv = mp ? a->slope*GGML_CPU_FP16_TO_FP32(mp[ic]) : 0.0f;
++        if (mv == -INFINITY) {
++            continue;
++        }
++        float s;
++        ggml_vec_dot_f16(DK, &s, 0, (ggml_fp16_t *) (k_base + ic*nbk1), 0, (ggml_fp16_t *) Q_q, 0, 1);
++        s = s*a->scale + mv;
++        const float Mold = M;
++        float ms = 1.0f;
++        float vs = 1.0f;
++        if (s > M) {
++            M = s;
++            ms = expf(Mold - M);
++            ggml_vec_scale_f32(DV, VKQ32, ms);
++        } else {
++            vs = expf(s - M);
++        }
++        ggml_vec_mad_f16_f32_row(DV, VKQ32, (const ggml_fp16_t *) (v_base + ic*nbv1), vs);
++        S = S*ms + vs;
+     }
++    SM[0] = S;
++    SM[1] = M;
+ }
++#endif
+ 
+ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
+         const ggml_compute_params * params,
+@@ -8595,11 +8669,33 @@
+         const float * pq = (const float *) ((char *) q->data + (iq1*nbq1 + iq2*nbq2 + iq3*nbq3));
+         q_to_vec_dot(pq, Q_q, DK);
+ 
++#if defined(__wasm_simd128__)
++        // The exported KV loop covers the F16 K/V, no-softcap case; it
++        // consumes the whole range, so the loop below is left empty.
++        int64_t ic_loop_start = ic_start;
++        if (k->type == GGML_TYPE_F16 && v->type == GGML_TYPE_F16 && logit_softcap == 0.0f && DK % 8 == 0 && DV % 8 == 0) {
++            float SM[2] = { S, M };
++            struct ggml_flash_attn_kv_f16_args a = {
++                /* Q_q */ (uint64_t) (uintptr_t) Q_q,
++                /* k_base */ (uint64_t) (uintptr_t) ((const char *) k->data + ik2*nbk2 + ik3*nbk3), /* nbk1 */ (uint64_t) nbk1,
++                /* v_base */ (uint64_t) (uintptr_t) ((const char *) v->data + iv2*nbv2 + iv3*nbv3), /* nbv1 */ (uint64_t) nbv1,
++                /* mp */ (uint64_t) (uintptr_t) mp, /* SM */ (uint64_t) (uintptr_t) SM, /* VKQ32 */ (uint64_t) (uintptr_t) VKQ32,
++                /* ic_start */ ic_start, /* ic_end */ ic_end,
++                /* slope */ slope, /* scale */ scale, /* DK */ (int32_t) DK, /* DV */ (int32_t) DV,
++            };
++            ggml_flash_attn_kv_f16(&a);
++            S = SM[0];
++            M = SM[1];
++            ic_loop_start = ic_end;
++        }
++#else
++        const int64_t ic_loop_start = ic_start;
++#endif
+         // online softmax / attention
+         // loop over n_kv and n_head_kv
+         // ref: https://arxiv.org/pdf/2112.05682.pdf
+ 
+-        for (int64_t ic = ic_start; ic < ic_end; ++ic) {
++        for (int64_t ic = ic_loop_start; ic < ic_end; ++ic) {
+             const float mv = mp ? slope*GGML_CPU_FP16_TO_FP32(mp[ic]) : 0.0f;
+             if (mv == -INFINITY) {
+                 continue;
