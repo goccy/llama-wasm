@@ -350,6 +350,26 @@ func Overrides() *Manifest {
 				},
 			},
 			{
+				Export: "dbg_vec_dot_q4_0_q8_0",
+				Role:   RoleVecDot,
+				Quant:  "q4_0",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_q4_0_q8_0", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotQ4_0Kernel(sym, p, wide) }),
+					body("dbg_vec_dot_q4_0_q8_0", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotQ4_0Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_q8_0_q8_0",
+				Role:   RoleVecDot,
+				Quant:  "q8_0",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_q8_0_q8_0", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotQ8_0Kernel(sym, p, wide) }),
+					body("dbg_vec_dot_q8_0_q8_0", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotQ8_0Kernel(sym, p, wide) }),
+				},
+			},
+			{
 				Export: "dbg_vec_dot_q5_0_q8_0",
 				Role:   RoleVecDot,
 				Quant:  "q5_0",

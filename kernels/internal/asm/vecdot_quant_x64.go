@@ -873,3 +873,70 @@ func x64VecDotQx1Kernel(sym string, pool *ConstPool, wide bool, fifth bool) stri
 	w("\tJMP\tovr_oob")
 	return sb.String()
 }
+
+// x64VecDotQ4_0Kernel: q4_0 x q8_0 on AVX2 (see a64VecDotQ4_0Kernel).
+// Per block: nibbles to bytes minus 8, then the sign-trick u8 x s8 pair
+// dot of x64VecDotQ5_0Kernel.
+func x64VecDotQ4_0Kernel(sym string, pool *ConstPool, wide bool) string {
+	return x64VecDotLegacy(sym, pool, wide, "q4_0", q4_0BlockBytes)
+}
+
+// x64VecDotQ8_0Kernel: q8_0 x q8_0 on AVX2, the same pair dot on the
+// stored bytes.
+func x64VecDotQ8_0Kernel(sym string, pool *ConstPool, wide bool) string {
+	return x64VecDotLegacy(sym, pool, wide, "q8_0", q8_0BlockBytes)
+}
+
+func x64VecDotLegacy(sym string, pool *ConstPool, wide bool, kind string, xBlock int) string {
+	var sb strings.Builder
+	w := func(format string, args ...any) { fmt.Fprintf(&sb, format+"\n", args...) }
+	cSym := pool.addBlob(x64QuantConsts())
+	lbl := "q4d"
+	if kind == "q8_0" {
+		lbl = "q8d"
+	}
+	w("// %s: %s x q8_0 dot (AVX2).", sym, kind)
+	w("\tVXORPS\tY0, Y0, Y0")
+	x64VecDotPrologue(w, wide, 5, xBlock, q8_0BlockBytes, lbl+"oob", lbl+"reduce")
+	w("\tVMOVDQU\t·%s+%d(SB), Y10", cSym, x64qcOnes)
+	if kind != "q8_0" {
+		w("\tVMOVDQU\t·%s+%d(SB), Y8", cSym, x64qcLow)
+		w("\tVMOVDQU\t·%s+%d(SB), Y9", cSym, x64qcM16)
+		w("\tVPSRLW\t$1, Y9, Y9") // 0x10 >> 1 in every byte pair: 8
+	}
+	w("%sblk:", lbl)
+	if kind == "q8_0" {
+		w("\tVMOVDQU\t2(SI), Y2")
+	} else {
+		// qx = bytes_from_nibbles_32(qs) - 8
+		w("\tVMOVDQU\t2(SI), X2")
+		w("\tVPSRLW\t$4, X2, X3")
+		w("\tVINSERTI128\t$1, X3, Y2, Y2")
+		w("\tVPAND\tY8, Y2, Y2")
+		w("\tVPSUBB\tY9, Y2, Y2")
+	}
+	// mul_sum_i8_pairs: ax = |qx|, sy = sign(qy, qx)
+	w("\tVMOVDQU\t2(DX), Y4")
+	w("\tVPSIGNB\tY2, Y2, Y5")
+	w("\tVPSIGNB\tY2, Y4, Y4")
+	w("\tVPMADDUBSW\tY4, Y5, Y5")
+	w("\tVPMADDWD\tY10, Y5, Y5")
+	w("\tVCVTDQ2PS\tY5, Y5")
+	x64F16Scalar(w, "SI", 0, 6)
+	x64F16Scalar(w, "DX", 0, 7)
+	w("\tVMULSS\tX7, X6, X6")
+	w("\tVBROADCASTSS\tX6, Y6")
+	w("\tVFMADD231PS\tY5, Y6, Y0")
+	w("\tADDQ\t$%d, SI", xBlock)
+	w("\tADDQ\t$%d, DX", q8_0BlockBytes)
+	w("\tDECQ\tCX")
+	w("\tJNZ\t%sblk", lbl)
+	w("%sreduce:", lbl)
+	x64Hsum8Store(w, false)
+	w("\tVZEROUPPER")
+	w("\tRET")
+	w("%soob:", lbl)
+	w("\tVZEROUPPER")
+	w("\tJMP\tovr_oob")
+	return sb.String()
+}

@@ -217,6 +217,24 @@
       ]
     },
     {
+      "export": "dbg_vec_dot_q4_0_q8_0",
+      "role": "vec_dot",
+      "quant": "q4_0",
+      "arches": [
+        "arm64",
+        "amd64"
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_q8_0_q8_0",
+      "role": "vec_dot",
+      "quant": "q8_0",
+      "arches": [
+        "arm64",
+        "amd64"
+      ]
+    },
+    {
       "export": "dbg_vec_dot_q5_0_q8_0",
       "role": "vec_dot",
       "quant": "q5_0",

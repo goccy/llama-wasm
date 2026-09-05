@@ -92,6 +92,9 @@ var registry = map[string]verification{
 	},
 	// The Q5_0 8x8 repack (block_q5_0x8, its GEMV/GEMM and the q8_0x4
 	// activation quantizer the GEMM consumes).
+	"wasm-vec-dot-q4-0-q8-0-kernels.patch": {
+		verify: hasExports("dbg_vec_dot_q4_0_q8_0", "dbg_vec_dot_q8_0_q8_0"),
+	},
 	"wasm-q8-repack-q5k-kernels.patch": {
 		verify: hasExports("dbg_gemv_q5_K_8x8", "dbg_gemm_q5_K_8x8"),
 	},

@@ -1,0 +1,24 @@
+diff --git a/ggml/src/ggml-cpu/arch/wasm/quants.c b/ggml/src/ggml-cpu/arch/wasm/quants.c
+index dd9e84116..1514eed33 100644
+--- a/ggml/src/ggml-cpu/arch/wasm/quants.c
++++ b/ggml/src/ggml-cpu/arch/wasm/quants.c
+@@ -237,6 +237,9 @@ void quantize_row_q8_K(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, in
+ 
+ //===================================== Dot products =================================
+ 
++// Exported out of line so a wasm-to-native transpiler can swap the body
++// for a native kernel (the dbg_* convention of the q8_0 repack GEMM).
++__attribute__((noinline, export_name("dbg_vec_dot_q4_0_q8_0")))
+ void ggml_vec_dot_q4_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc) {
+     const int qk = QK8_0;
+     const int nb = n / qk;
+@@ -630,6 +633,9 @@ void ggml_vec_dot_q5_1_q8_1(int n, float * GGML_RESTRICT s, size_t bs, const voi
+ #endif
+ }
+ 
++// Exported out of line so a wasm-to-native transpiler can swap the body
++// for a native kernel (the dbg_* convention of the q8_0 repack GEMM).
++__attribute__((noinline, export_name("dbg_vec_dot_q8_0_q8_0")))
+ void ggml_vec_dot_q8_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc) {
+     const int qk = QK8_0;
+     const int nb = n / qk;

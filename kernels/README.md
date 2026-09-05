@@ -59,6 +59,8 @@ would retire the addition.
 | `dbg_vec_dot_q5_1_q8_1` | q5_1 x q8_1 dot (Q5_1 rows) | arm64 dotprod, amd64 avx2 | the q5_0 dot on unsigned quants plus the block min term m * s |
 | `dbg_vec_dot_q4_1_q8_1` | q4_1 x q8_1 dot (Q4_1 rows) | arm64 dotprod, amd64 avx2 | nibbles unsigned, SDOT / VPMADDUBSW, plus the block min term |
 | `dbg_vec_dot_q5_0_q8_0` | q5_0 x q8_0 dot (the matmul of tensors K-quants cannot cover, e.g. Qwen2.5-0.5B's 896-wide rows) | arm64 dotprod, amd64 avx2 | lower the fifth-bit gather + i16 dot pairs to CMTST/SDOT |
+| `dbg_vec_dot_q4_0_q8_0` | q4_0 x q8_0 dot (the per-row path of a Q4_0 tensor the backend does not repack, e.g. a shared token embedding used as the output projection) | arm64 dotprod, amd64 avx2 | lower the nibble unpack + i16 dot pairs to SDOT |
+| `dbg_vec_dot_q8_0_q8_0` | q8_0 x q8_0 dot (same role for Q8_0 tensors) | arm64 dotprod, amd64 avx2 | lower the i16 dot pairs to SDOT |
 | `dbg_vec_dot_q5_K_q8_K` | q5_K x q8_K dot (Q5_K rows that are not repacked; 2x2 tile for nrc 2) | arm64 dotprod, amd64 avx2 | the q4_K dot with the fifth bit of every quant merged from qh |
 | `dbg_vec_dot_q2_K_q8_K` | q2_K x q8_K dot (Q2_K rows) | arm64 dotprod, amd64 avx2 | 2-bit fields shifted out of 32-byte loads, SDOT/VPMADDUBSW per 16-quant sub-block, nibble scales as lane multiplies, mins through the block sums |
 | `dbg_vec_dot_q3_K_q8_K` | q3_K x q8_K dot (Q3_K rows) | arm64 dotprod, amd64 avx2 | quants rebuilt unsigned (2-bit field + hmask bit), 6-bit scales unpacked and centred, -4 folded through the block sums |

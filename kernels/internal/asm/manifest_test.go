@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -51,7 +52,8 @@ func TestManifestKernelIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	have, err := os.ReadFile(filepath.Join("..", "..", "asm", "kernels.json"))
+	_, self, _, _ := runtime.Caller(0) // kernels/internal/asm/manifest_test.go
+	have, err := os.ReadFile(filepath.Join(filepath.Dir(self), "..", "..", "asm", "kernels.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

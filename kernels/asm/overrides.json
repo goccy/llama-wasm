@@ -652,6 +652,62 @@
       ]
     },
     {
+      "export": "dbg_vec_dot_q4_0_q8_0",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_q4_0_q8_0_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_q4_0_q8_0_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_q8_0_q8_0",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_q8_0_q8_0_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_q8_0_q8_0_amd64_avx2.s"
+        }
+      ]
+    },
+    {
       "export": "dbg_vec_dot_q5_0_q8_0",
       "params": [
         "i32",
