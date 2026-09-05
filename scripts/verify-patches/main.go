@@ -95,6 +95,13 @@ var registry = map[string]verification{
 	"wasm-vec-dot-q4-0-q8-0-kernels.patch": {
 		verify: hasExports("dbg_vec_dot_q4_0_q8_0", "dbg_vec_dot_q8_0_q8_0"),
 	},
+	"wasm-mxfp4-iq4-xs-kernels.patch": {
+		verify: hasExports("dbg_gemv_mxfp4_8x8", "dbg_gemm_mxfp4_8x8", "dbg_vec_dot_mxfp4_q8_0", "dbg_vec_dot_iq4_xs_q8_K"),
+	},
+	"wasm-iquant-vec-dot-kernels.patch": {
+		verify: hasExports("dbg_vec_dot_iq3_xxs_q8_K", "dbg_vec_dot_iq3_s_q8_K", "dbg_vec_dot_iq2_xxs_q8_K", "dbg_vec_dot_iq2_xs_q8_K", "dbg_vec_dot_iq2_s_q8_K",
+			"dbg_vec_dot_iq1_s_q8_K", "dbg_vec_dot_iq1_m_q8_K", "dbg_vec_dot_tq1_0_q8_K", "dbg_vec_dot_tq2_0_q8_K", "dbg_vec_dot_nvfp4_q8_0", "dbg_vec_dot_q1_0_q8_0", "dbg_vec_dot_q2_0_q8_0"),
+	},
 	"wasm-q8-repack-q5k-kernels.patch": {
 		verify: hasExports("dbg_gemv_q5_K_8x8", "dbg_gemm_q5_K_8x8"),
 	},

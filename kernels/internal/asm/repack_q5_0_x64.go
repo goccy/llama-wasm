@@ -1,6 +1,7 @@
 package asm
 
 import (
+	"encoding/binary"
 	"fmt"
 	"strings"
 )
@@ -22,12 +23,17 @@ import (
 // 96: VPSHUFB index, low-nibble runs; 128: high-nibble runs; 160: 16 x
 // i16 1; 192: 32 x u8 1; 224: VPERMPS index [0 1 4 5 2 3 6 7].
 func x64Q5Consts() []byte {
-	c := make([]byte, 320)
+	c := make([]byte, 416)
 	for i := 0; i < 32; i++ {
 		c[288+i] = 0x88 // q4_0x8 nibble xor
 	}
 	for i := 0; i < 32; i++ {
 		c[256+i] = byte(kvaluesIQ4NL[i%16]) // iq4_nl table, signed
+		c[320+i] = byte(kvaluesFP4[i%16])   // mxfp4 table, signed
+	}
+	for i := 0; i < 8; i++ {
+		binary.LittleEndian.PutUint32(c[352+4*i:], 1)          // i32 ones (E8M0 decode)
+		binary.LittleEndian.PutUint32(c[384+4*i:], 0x00200000) // E8M0 denormal base
 	}
 	for i := 0; i < 32; i++ {
 		c[i] = 0x0f
@@ -56,6 +62,9 @@ const (
 	x64q5Ones8  = 192
 	x64q5LUT    = 256
 	x64q5Xor    = 288
+	x64q5FP4    = 320
+	x64q5One32  = 352
+	x64q5Denorm = 384
 	x64q5Perm   = 224
 	// GEMM frame: 0 the rows' 16 x block sums in hadd-order lanes (row 0
 	// at 0, 1 at 4, 2 at 16, 3 at 20) | 32 f32 tiles (4 x 32) | 160 vx |
@@ -86,7 +95,11 @@ func x64X8Unpack(w func(string, ...any), c string, m, raw, lo, hi, qh int, L x8L
 		// sums, and an unsigned table (kvalues + 127, up to 240) against
 		// s8 activations overflows them; |kvalues| <= 127 keeps every pair
 		// sum within range.
-		w("\tVMOVDQU\t%s+%d(SB), Y%d", c, x64q5LUT, qh)
+		tbl := x64q5LUT
+		if L.e8m0 {
+			tbl = x64q5FP4
+		}
+		w("\tVMOVDQU\t%s+%d(SB), Y%d", c, tbl, qh)
 		w("\tVPSHUFB\tY%d, Y%d, Y%d", lo, qh, lo)
 		w("\tVPSHUFB\tY%d, Y%d, Y%d", hi, qh, hi)
 	}
@@ -195,6 +208,34 @@ func x64GemmIQ4NL8x8Kernel(sym string, pool *ConstPool, wide bool) string {
 	return x64GemmX8Kernel(sym, pool, wide, iq4_nlx8L)
 }
 
+// x64X8Scales leaves the block's eight column scales as f32 in Y<dst>:
+// the f16 row widened, or for E8M0 blocks ggml_e8m0_to_fp32_half of each
+// byte (2^(e-128): (e-1) << 23 for e >= 2, the denormal 0x00200000 << e
+// below), using three scratch registers.
+func x64X8Scales(w func(string, ...any), c string, L x8Layout, dst, t0, t1, t2 int) {
+	if !L.e8m0 {
+		w("\tVCVTPH2PS\t(R9), Y%d", dst)
+		return
+	}
+	w("\tVPMOVZXBD\t(R9), Y%d", dst)
+	w("\tVPSUBD\t%s+%d(SB), Y%d, Y%d", c, x64q5One32, dst, t0)
+	w("\tVPSLLD\t$23, Y%d, Y%d", t0, t0) // (e-1) << 23
+	w("\tVMOVDQU\t%s+%d(SB), Y%d", c, x64q5Denorm, t1)
+	w("\tVPSLLVD\tY%d, Y%d, Y%d", dst, t1, t1)                   // 0x00200000 << e
+	w("\tVPCMPGTD\t%s+%d(SB), Y%d, Y%d", c, x64q5One32, dst, t2) // e > 1
+	w("\tVBLENDVPS\tY%d, Y%d, Y%d, Y%d", t2, t0, t1, dst)
+}
+
+// x64GemvMXFP4_8x8Kernel / x64GemmMXFP4_8x8Kernel: the iq4_nl x8 bodies
+// with the fp4 table and E8M0 column scales.
+func x64GemvMXFP4_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
+	return x64GemvX8Kernel(sym, pool, wide, mxfp4x8L)
+}
+
+func x64GemmMXFP4_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
+	return x64GemmX8Kernel(sym, pool, wide, mxfp4x8L)
+}
+
 func x64GemvX8Kernel(sym string, pool *ConstPool, wide bool, L x8Layout) string {
 	var sb strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&sb, format+"\n", args...) }
@@ -260,7 +301,7 @@ func x64GemvX8Kernel(sym string, pool *ConstPool, wide bool, L x8Layout) string 
 		w("\tVPSUBD\tY11, Y0, Y0")
 	}
 	w("\tVCVTDQ2PS\tY0, Y0")
-	w("\tVCVTPH2PS\t(R9), Y14")
+	x64X8Scales(w, c, L, 14, 4, 5, 6)
 	w("\tVPERMPS\tY14, Y15, Y14")
 	w("\tMOVWLZX\t(DX), AX")
 	w("\tVMOVD\tAX, X10")
@@ -388,7 +429,7 @@ func x64GemmX8Kernel(sym string, pool *ConstPool, wide bool, L x8Layout) string 
 	}
 	// epilogue: column scales in hadd order (Y15), then per row
 	w("\tVMOVDQU\t%s+%d(SB), Y13", c, x64q5Perm)
-	w("\tVCVTPH2PS\t(R9), Y15")
+	x64X8Scales(w, c, L, 15, 8, 9, 14)
 	w("\tVPERMPS\tY15, Y13, Y15")
 	for r := 0; r < 4; r++ {
 		w("\tVPHADDD\tY%d, Y%d, Y14", 2*r+1, 2*r) // [c0 c1 c4 c5 | c2 c3 c6 c7]

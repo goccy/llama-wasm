@@ -1,4 +1,4 @@
-// dbg_vec_dot_iq4_nl_q8_0: iq4_nl x q8_0 dot, TBL kvalues lookup and SDOT, two blocks per step.
+// dbg_vec_dot_iq4_nl_q8_0: iq4_nl x q8_0 dot, TBL table lookup and SDOT, two blocks per step.
 	WORD $0x4f000400 // movi v0.4s, #0
 	WORD $0x4f000401 // movi v1.4s, #0
 	MOVW	l0+8(FP), R1
@@ -23,7 +23,7 @@
 	BLO	iq4oob
 	ADD	R20, R3, R3
 	ADD	R20, R4, R4
-	MOVD	$·ovr_dbg_vec_dot_iq4_nl_q8_0_dotprod_b16_8198adbfcfddeaf6010d192635455971(SB), R5
+	MOVD	$·ovr_dbg_vec_dot_iq4_nl_q8_0_dotprod_b16_61aa47540aa024b5(SB), R5
 	WORD $0x3cc000b2 // ldur q18, [x5, #0]
 	WORD $0x4f00e5f0 // movi v16.16b, #15
 iq4loop2:
@@ -40,8 +40,8 @@ iq4loop2:
 	WORD $0x4e88948c // sdot v12.4s, v4.16b, v8.16b
 	WORD $0x4e8a94cc // sdot v12.4s, v6.16b, v10.16b
 	WORD $0x7c40006e // ldur h14, [x3, #0]
-	WORD $0x7c400082 // ldur h2, [x4, #0]
 	WORD $0x1ee241ce // fcvt s14, h14
+	WORD $0x7c400082 // ldur h2, [x4, #0]
 	WORD $0x1ee24042 // fcvt s2, h2
 	WORD $0x1e2209ce // fmul s14, s14, s2
 	WORD $0x4e21d98c // scvtf v12.4s, v12.4s
@@ -57,8 +57,8 @@ iq4loop2:
 	WORD $0x4e8994ad // sdot v13.4s, v5.16b, v9.16b
 	WORD $0x4e8b94ed // sdot v13.4s, v7.16b, v11.16b
 	WORD $0x7c41206f // ldur h15, [x3, #18]
-	WORD $0x7c422083 // ldur h3, [x4, #34]
 	WORD $0x1ee241ef // fcvt s15, h15
+	WORD $0x7c422083 // ldur h3, [x4, #34]
 	WORD $0x1ee24063 // fcvt s3, h3
 	WORD $0x1e2309ef // fmul s15, s15, s3
 	WORD $0x4e21d9ad // scvtf v13.4s, v13.4s
@@ -80,8 +80,8 @@ iq4tail:
 	WORD $0x4e88948c // sdot v12.4s, v4.16b, v8.16b
 	WORD $0x4e8a94cc // sdot v12.4s, v6.16b, v10.16b
 	WORD $0x7c40006e // ldur h14, [x3, #0]
-	WORD $0x7c400082 // ldur h2, [x4, #0]
 	WORD $0x1ee241ce // fcvt s14, h14
+	WORD $0x7c400082 // ldur h2, [x4, #0]
 	WORD $0x1ee24042 // fcvt s2, h2
 	WORD $0x1e2209ce // fmul s14, s14, s2
 	WORD $0x4e21d98c // scvtf v12.4s, v12.4s
@@ -95,6 +95,6 @@ iq4reduce:
 iq4oob:
 	B	ovr_oob
 
-DATA ·ovr_dbg_vec_dot_iq4_nl_q8_0_dotprod_b16_8198adbfcfddeaf6010d192635455971+0(SB)/8, $0xf6eaddcfbfad9881
-DATA ·ovr_dbg_vec_dot_iq4_nl_q8_0_dotprod_b16_8198adbfcfddeaf6010d192635455971+8(SB)/8, $0x7159453526190d01
-GLOBL ·ovr_dbg_vec_dot_iq4_nl_q8_0_dotprod_b16_8198adbfcfddeaf6010d192635455971(SB), RODATA|NOPTR, $16
+DATA ·ovr_dbg_vec_dot_iq4_nl_q8_0_dotprod_b16_61aa47540aa024b5+0(SB)/8, $0xf6eaddcfbfad9881
+DATA ·ovr_dbg_vec_dot_iq4_nl_q8_0_dotprod_b16_61aa47540aa024b5+8(SB)/8, $0x7159453526190d01
+GLOBL ·ovr_dbg_vec_dot_iq4_nl_q8_0_dotprod_b16_61aa47540aa024b5(SB), RODATA|NOPTR, $16

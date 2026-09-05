@@ -65,7 +65,7 @@ famaskok:
 	ANDW	$1, R23, R23
 	LSRW	$4, R1, R1
 	LSRW	$4, R2, R2
-	MOVD	$·ovr_dbg_flash_attn_kv_f16_neon_b64_0000404b3baab83f0072313f8ebebf351020073c179f2b3d33af2a3edbfeff3ef6ff7f3f0000fc42000040430000803f000000820000007fffffff7f00000000(SB), R13
+	MOVD	$·ovr_dbg_flash_attn_kv_f16_neon_b64_e8a24d2e6ee6e325(SB), R13
 	VLD1	(R13), [V28.S4, V29.S4, V30.S4, V31.S4]
 	WORD $0x4e0c07db // dup v27.4s, v30.s[1]
 	WORD $0x4e1407da // dup v26.4s, v30.s[2]
@@ -280,12 +280,12 @@ fadone:
 faoob:
 	B	ovr_oob
 
-DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_0000404b3baab83f0072313f8ebebf351020073c179f2b3d33af2a3edbfeff3ef6ff7f3f0000fc42000040430000803f000000820000007fffffff7f00000000+0(SB)/8, $0x3fb8aa3b4b400000
-DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_0000404b3baab83f0072313f8ebebf351020073c179f2b3d33af2a3edbfeff3ef6ff7f3f0000fc42000040430000803f000000820000007fffffff7f00000000+8(SB)/8, $0x35bfbe8e3f317200
-DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_0000404b3baab83f0072313f8ebebf351020073c179f2b3d33af2a3edbfeff3ef6ff7f3f0000fc42000040430000803f000000820000007fffffff7f00000000+16(SB)/8, $0x3d2b9f173c072010
-DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_0000404b3baab83f0072313f8ebebf351020073c179f2b3d33af2a3edbfeff3ef6ff7f3f0000fc42000040430000803f000000820000007fffffff7f00000000+24(SB)/8, $0x3efffedb3e2aaf33
-DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_0000404b3baab83f0072313f8ebebf351020073c179f2b3d33af2a3edbfeff3ef6ff7f3f0000fc42000040430000803f000000820000007fffffff7f00000000+32(SB)/8, $0x42fc00003f7ffff6
-DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_0000404b3baab83f0072313f8ebebf351020073c179f2b3d33af2a3edbfeff3ef6ff7f3f0000fc42000040430000803f000000820000007fffffff7f00000000+40(SB)/8, $0x3f80000043400000
-DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_0000404b3baab83f0072313f8ebebf351020073c179f2b3d33af2a3edbfeff3ef6ff7f3f0000fc42000040430000803f000000820000007fffffff7f00000000+48(SB)/8, $0x7f00000082000000
-DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_0000404b3baab83f0072313f8ebebf351020073c179f2b3d33af2a3edbfeff3ef6ff7f3f0000fc42000040430000803f000000820000007fffffff7f00000000+56(SB)/8, $0x7fffffff
-GLOBL ·ovr_dbg_flash_attn_kv_f16_neon_b64_0000404b3baab83f0072313f8ebebf351020073c179f2b3d33af2a3edbfeff3ef6ff7f3f0000fc42000040430000803f000000820000007fffffff7f00000000(SB), RODATA|NOPTR, $64
+DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_e8a24d2e6ee6e325+0(SB)/8, $0x3fb8aa3b4b400000
+DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_e8a24d2e6ee6e325+8(SB)/8, $0x35bfbe8e3f317200
+DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_e8a24d2e6ee6e325+16(SB)/8, $0x3d2b9f173c072010
+DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_e8a24d2e6ee6e325+24(SB)/8, $0x3efffedb3e2aaf33
+DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_e8a24d2e6ee6e325+32(SB)/8, $0x42fc00003f7ffff6
+DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_e8a24d2e6ee6e325+40(SB)/8, $0x3f80000043400000
+DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_e8a24d2e6ee6e325+48(SB)/8, $0x7f00000082000000
+DATA ·ovr_dbg_flash_attn_kv_f16_neon_b64_e8a24d2e6ee6e325+56(SB)/8, $0x7fffffff
+GLOBL ·ovr_dbg_flash_attn_kv_f16_neon_b64_e8a24d2e6ee6e325(SB), RODATA|NOPTR, $64
