@@ -106,20 +106,42 @@ var registry = map[string]verification{
 	},
 }
 
-// hasExports checks that every name appears in the module's export
-// section. Export names are stored as length-prefixed UTF-8 in the
-// binary, so a missing byte string is a missing export; a present one
-// is accepted without decoding the section (nothing else in the module
-// carries a dbg_-prefixed name).
+// hasExports checks that every name is exported by the module AND that
+// the exported function is reachable: called directly by another function
+// or held by a funcref table (called through type_traits). An export that
+// merely exists is not evidence the kernel runs — the q2_K / q3_K / q5_K
+// dot exports once sat on the generic bodies while the dispatch table named
+// the wasm SIMD ones, and the native bodies substituted for them never
+// executed. The module is decoded once per run (see wasm.go).
 func hasExports(names ...string) func([]byte) error {
 	return func(wasm []byte) error {
+		m, err := decodedModule(wasm)
+		if err != nil {
+			return err
+		}
 		for _, n := range names {
-			if !bytes.Contains(wasm, []byte(n)) {
-				return fmt.Errorf("export %q not found in the module", n)
+			ok, why := m.reachable(n)
+			if !ok {
+				return fmt.Errorf("export %q: %s", n, why)
 			}
 		}
 		return nil
 	}
+}
+
+var (
+	decodedFor []byte
+	decoded    *module
+	decodedErr error
+)
+
+// decodedModule parses the module once and reuses it across checks.
+func decodedModule(wasm []byte) (*module, error) {
+	if decoded == nil && decodedErr == nil || !bytes.Equal(decodedFor, wasm) {
+		decodedFor = wasm
+		decoded, decodedErr = parseModule(wasm)
+	}
+	return decoded, decodedErr
 }
 
 func run() error {
