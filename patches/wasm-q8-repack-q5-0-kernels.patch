@@ -1,182 +1,95 @@
-diff --git a/ggml/src/ggml-cpu/repack.h b/ggml/src/ggml-cpu/repack.h
-index cb21edf..581e530 100644
---- a/ggml/src/ggml-cpu/repack.h
-+++ b/ggml/src/ggml-cpu/repack.h
-@@ -40,6 +40,24 @@ using block_q8_0x4 = block<8, 4>;
- using block_q8_0x8 = block<8, 8>;
- using block_q8_0x16 = block<8, 16>;
- 
-+// Q5_0 repacked eight rows wide (the wasm build's prompt-path layout for
-+// Q5_0 tensors; a wasm-to-native transpiler substitutes native GEMV/GEMM
-+// bodies for the exported kernels). qs interleaves the eight rows'
-+// nibble bytes in 8-byte groups exactly like block_q4_0x8 (group i holds
-+// bytes 8*(i/8).. of row i%8; a byte carries element j in its low nibble
-+// and element j+16 in its high nibble), without the sign xor: nibbles
-+// stay 0..15 and the fifth bit adds 16, the -16 offset is applied by the
-+// kernels. qh stores the fifth bits per 16-byte group m (= groups 2m,
-+// 2m+1): qh[4m+0], qh[4m+1] are the bits of the two rows' low-nibble
-+// elements 8*(m/4)..+8, qh[4m+2], qh[4m+3] those of the high-nibble
-+// elements 16 later.
-+struct block_q5_0x8 {
-+    ggml_half d[8];
-+    uint8_t   qh[32];
-+    uint8_t   qs[128];
-+};
-+static_assert(sizeof(block_q5_0x8) == 8 * sizeof(ggml_half) + 32 + 128, "wrong q5_0x8 block size/padding");
-+
- struct block_q4_Kx8 {
-     ggml_half d[8];      // super-block scale for quantized scales
-     ggml_half dmin[8];   // super-block scale for quantized mins
-@@ -155,6 +173,7 @@ void ggml_gemv_iq4_nl_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const
- void ggml_gemv_iq4_nl_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
- void ggml_gemv_mxfp4_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
- void ggml_gemv_mxfp4_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
-+void ggml_gemv_q5_0_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
- void ggml_gemv_q8_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
- void ggml_gemv_q8_0_4x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
- void ggml_gemm_q4_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
-@@ -171,6 +190,7 @@ void ggml_gemm_iq4_nl_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const
- void ggml_gemm_iq4_nl_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
- void ggml_gemm_mxfp4_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
- void ggml_gemm_mxfp4_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
-+void ggml_gemm_q5_0_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
- void ggml_gemm_q8_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
- void ggml_gemm_q8_0_4x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
- #if defined __riscv_zvfh
-diff --git a/ggml/src/ggml-cpu/repack.cpp b/ggml/src/ggml-cpu/repack.cpp
-index 2b809d7..866e013 100644
---- a/ggml/src/ggml-cpu/repack.cpp
-+++ b/ggml/src/ggml-cpu/repack.cpp
-@@ -170,6 +170,12 @@ void ggml_quantize_mat_q8_0_4x4_generic(const float * GGML_RESTRICT x, void * GG
-     }
- }
- 
-+#if defined(__wasm_simd128__)
-+// On wasm this generic body IS ggml_quantize_mat_q8_0_4x8 (arch-fallback.h),
-+// the activation quantizer of the 8-wide repack GEMMs; exported out of
-+// line so a wasm-to-native transpiler can substitute a native body.
-+__attribute__((noinline, export_name("dbg_quantize_mat_q8_0_4x8")))
-+#endif
- void ggml_quantize_mat_q8_0_4x8_generic(const float * GGML_RESTRICT x, void * GGML_RESTRICT vy, int64_t k) {
-     assert(QK8_0 == 32);
-     assert(k % QK8_0 == 0);
-@@ -3948,6 +3954,60 @@ template <> int repack<block_mxfp4, 8, 8>(struct ggml_tensor * t, const void * d
-     return repack_mxfp4_to_mxfp4_8_bl(t, 8, data, data_size);
- }
- 
-+#if defined(__wasm_simd128__)
-+// Q5_0 -> block_q5_0x8 (see repack.h for the layout).
-+static block_q5_0x8 make_block_q5_0x8(const block_q5_0 * in) {
-+    block_q5_0x8 out;
-+    for (int i = 0; i < 8; i++) {
-+        out.d[i] = in[i].d;
-+    }
-+    for (int i = 0; i < 16; i++) {
-+        memcpy(&out.qs[8 * i], &in[i % 8].qs[(i / 8) * 8], 8);
-+    }
-+    for (int m = 0; m < 8; m++) {
-+        const int c0 = 2 * (m % 4);
-+        const int b  = m / 4;
-+        out.qh[4 * m + 0] = in[c0].qh[b];
-+        out.qh[4 * m + 1] = in[c0 + 1].qh[b];
-+        out.qh[4 * m + 2] = in[c0].qh[2 + b];
-+        out.qh[4 * m + 3] = in[c0 + 1].qh[2 + b];
-+    }
-+    return out;
-+}
-+
-+static int repack_q5_0_to_q5_0_8_bl(struct ggml_tensor * t, const void * GGML_RESTRICT data, size_t data_size) {
-+    GGML_ASSERT(t->type == GGML_TYPE_Q5_0);
-+    constexpr int nrows_interleaved = 8;
-+
-+    block_q5_0x8 *     dst = (block_q5_0x8 *) t->data;
-+    const block_q5_0 * src = (const block_q5_0 *) data;
-+    block_q5_0         dst_tmp[8];
-+    int                nrow    = ggml_nrows(t);
-+    int                nblocks = t->ne[0] / QK5_0;
-+
-+    GGML_ASSERT(data_size == nrow * nblocks * sizeof(block_q5_0));
-+
-+    if (t->ne[1] % nrows_interleaved != 0 || t->ne[0] % 8 != 0) {
-+        return -1;
-+    }
-+
-+    for (int b = 0; b < nrow; b += nrows_interleaved) {
-+        for (int64_t x = 0; x < nblocks; x++) {
-+            for (int i = 0; i < nrows_interleaved; i++) {
-+                dst_tmp[i] = src[x + i * nblocks];
-+            }
-+            *dst++ = make_block_q5_0x8(dst_tmp);
-+        }
-+        src += nrows_interleaved * nblocks;
-+    }
-+    return 0;
-+}
-+
-+template <> int repack<block_q5_0, 8, 8>(struct ggml_tensor * t, const void * data, size_t data_size) {
-+    return repack_q5_0_to_q5_0_8_bl(t, data, data_size);
-+}
-+#endif // __wasm_simd128__
-+
- template <> int repack<block_q8_0, 4, 4>(struct ggml_tensor * t, const void * data, size_t data_size) {
-     return repack_q8_0_to_q8_0_4_bl(t, 4, data, data_size);
- }
-@@ -4045,6 +4105,12 @@ template <> void gemv<block_mxfp4, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_
-     ggml_gemv_mxfp4_8x8_q8_0(n, s, bs, vx, vy, nr, nc);
- }
- 
-+#if defined(__wasm_simd128__)
-+template <> void gemv<block_q5_0, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_t bs, const void * vx, const void * vy, int nr, int nc) {
-+    ggml_gemv_q5_0_8x8_q8_0(n, s, bs, vx, vy, nr, nc);
-+}
-+#endif
-+
- template <> void gemv<block_q8_0, 4, 4, GGML_TYPE_Q8_0>(int n, float * s, size_t bs, const void * vx, const void * vy, int nr, int nc) {
-     ggml_gemv_q8_0_4x4_q8_0(n, s, bs, vx, vy, nr, nc);
- }
-@@ -4142,6 +4208,12 @@ template <> void gemm<block_mxfp4, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_
-     ggml_gemm_mxfp4_8x8_q8_0(n, s, bs, vx, vy, nr, nc);
- }
- 
-+#if defined(__wasm_simd128__)
-+template <> void gemm<block_q5_0, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_t bs, const void * vx, const void * vy, int nr, int nc) {
-+    ggml_gemm_q5_0_8x8_q8_0(n, s, bs, vx, vy, nr, nc);
-+}
-+#endif
-+
- template <> void gemm<block_q8_0, 4, 4, GGML_TYPE_Q8_0>(int n, float * s, size_t bs, const void * vx, const void * vy, int nr, int nc) {
-     ggml_gemm_q8_0_4x4_q8_0(n, s, bs, vx, vy, nr, nc);
- }
-@@ -4578,6 +4650,11 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
- 
-     // instance for Q8_0
-     static const ggml::cpu::repack::tensor_traits<block_q8_0, 4, 4, GGML_TYPE_Q8_0> q8_0_4x4_q8_0;
-+#if defined(__wasm_simd128__)
-+    // instance for Q5_0 (wasm: the prompt path otherwise runs per-row vec_dot;
-+    // native x86 reaches a GEMM through llamafile sgemm instead)
-+    static const ggml::cpu::repack::tensor_traits<block_q5_0, 8, 8, GGML_TYPE_Q8_0> q5_0_8x8_q8_0;
-+#endif
-     static const ggml::cpu::repack::tensor_traits<block_q8_0, 8, 4, GGML_TYPE_Q8_0> q8_0_4x8_q8_0;
- 
-     // instances for RISC-V
-@@ -4726,6 +4803,12 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
-                 return &mxfp4_4x4_q8_0;
-             }
-         }
-+#if defined(__wasm_simd128__)
-+    } else if (cur->type == GGML_TYPE_Q5_0) {
-+        if (cur->ne[1] % 8 == 0) {
-+            return &q5_0_8x8_q8_0;
-+        }
-+#endif
-     } else if (cur->type == GGML_TYPE_Q8_0) {
-         if (ggml_cpu_has_neon() && ggml_cpu_has_matmul_int8()) {
-             if (cur->ne[1] % 4 == 0) {
+diff --git a/ggml/src/ggml-cpu/arch-fallback.h b/ggml/src/ggml-cpu/arch-fallback.h
+index 9babc733e..f1e0acd57 100644
+--- a/ggml/src/ggml-cpu/arch-fallback.h
++++ b/ggml/src/ggml-cpu/arch-fallback.h
+@@ -314,7 +314,6 @@
+ #define ggml_vec_dot_q1_0_q8_0_generic ggml_vec_dot_q1_0_q8_0
+ #define ggml_vec_dot_q2_0_q8_0_generic ggml_vec_dot_q2_0_q8_0
+ // repack.cpp
+-#define ggml_quantize_mat_q8_0_4x8_generic ggml_quantize_mat_q8_0_4x8
+ #define ggml_quantize_mat_q8_K_4x4_generic ggml_quantize_mat_q8_K_4x4
+ #define ggml_quantize_mat_q8_K_4x8_generic ggml_quantize_mat_q8_K_4x8
+ #define ggml_gemv_q4_0_4x4_q8_0_generic ggml_gemv_q4_0_4x4_q8_0
 diff --git a/ggml/src/ggml-cpu/arch/wasm/repack.cpp b/ggml/src/ggml-cpu/arch/wasm/repack.cpp
-index 9db77fe..d414cd7 100644
+index 9db77fe9d..0a68c7fef 100644
 --- a/ggml/src/ggml-cpu/arch/wasm/repack.cpp
 +++ b/ggml/src/ggml-cpu/arch/wasm/repack.cpp
-@@ -231,3 +231,98 @@ void ggml_gemm_q8_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const vo
+@@ -117,6 +117,74 @@ void ggml_quantize_mat_q8_0_4x4(const float * GGML_RESTRICT x, void * GGML_RESTR
+ #endif
+ }
+ 
++// The 8-wide interleave of the same quantizer, feeding the x8 repack
++// GEMMs (q4_0, q5_0, iq4_nl): qs[32k + 8m] holds eight consecutive
++// elements of row m. It must quantize exactly like quantize_row_q8_0,
++// which feeds the GEMV path of the same tensors (ggml quantizes full
++// 4-row groups here and the remaining rows there), so it rounds to
++// nearest even as that function and every native SIMD quantizer do;
++// the generic body's roundf rounds ties away and would make a batch
++// decode differ from a sequential one. Exported so a wasm-to-native
++// transpiler can substitute a native body.
++__attribute__((noinline, export_name("dbg_quantize_mat_q8_0_4x8")))
++void ggml_quantize_mat_q8_0_4x8(const float * GGML_RESTRICT x, void * GGML_RESTRICT vy, int64_t k) {
++    assert(QK8_0 == 32);
++    assert(k % QK8_0 == 0);
++    const int nb = k / QK8_0;
++
++    block_q8_0x4 * GGML_RESTRICT y = (block_q8_0x4 *) vy;
++
++#if defined(__wasm_simd128__)
++    v128_t srcv[4][8];
++    float  id[4];
++
++    for (int i = 0; i < nb; i++) {
++        for (int row_iter = 0; row_iter < 4; row_iter++) {
++            const float * GGML_RESTRICT xr = x + row_iter * k + i * QK8_0;
++            for (int j = 0; j < 8; j++) srcv[row_iter][j] = wasm_v128_load(xr + 4 * j);
++
++            v128_t amaxv[4];
++            for (int j = 0; j < 4; j++) {
++                amaxv[j] = wasm_f32x4_max(wasm_f32x4_abs(srcv[row_iter][2 * j]),
++                                          wasm_f32x4_abs(srcv[row_iter][2 * j + 1]));
++            }
++            amaxv[0] = wasm_f32x4_max(amaxv[0], amaxv[1]);
++            amaxv[2] = wasm_f32x4_max(amaxv[2], amaxv[3]);
++            amaxv[0] = wasm_f32x4_max(amaxv[0], amaxv[2]);
++
++            const float amax = MAX(MAX(wasm_f32x4_extract_lane(amaxv[0], 0),
++                                       wasm_f32x4_extract_lane(amaxv[0], 1)),
++                                   MAX(wasm_f32x4_extract_lane(amaxv[0], 2),
++                                       wasm_f32x4_extract_lane(amaxv[0], 3)));
++
++            const float d = amax / ((1 << 7) - 1);
++            id[row_iter] = d ? 1.0f / d : 0.0f;
++
++            y[i].d[row_iter] = GGML_CPU_FP32_TO_FP16(d);
++        }
++
++        for (int j = 0; j < 4; j++) {
++            v128_t r[4];
++            for (int m = 0; m < 4; m++) {
++                const v128_t idm = wasm_f32x4_splat(id[m]);
++                const v128_t lo = wasm_i32x4_trunc_sat_f32x4(wasm_f32x4_nearest(wasm_f32x4_mul(srcv[m][2 * j], idm)));
++                const v128_t hi = wasm_i32x4_trunc_sat_f32x4(wasm_f32x4_nearest(wasm_f32x4_mul(srcv[m][2 * j + 1], idm)));
++                // |q| <= 127, so the saturating packs are exact: eight
++                // consecutive elements of row m as i16.
++                r[m] = wasm_i16x8_narrow_i32x4(lo, hi);
++            }
++            // [row0 8B][row1 8B] then [row2 8B][row3 8B]: the 32-byte group j.
++            wasm_v128_store(y[i].qs + 32 * j,      wasm_i8x16_narrow_i16x8(r[0], r[1]));
++            wasm_v128_store(y[i].qs + 32 * j + 16, wasm_i8x16_narrow_i16x8(r[2], r[3]));
++        }
++    }
++#else
++    UNUSED(nb);
++    UNUSED(y);
++    ggml_quantize_mat_q8_0_4x8_generic(x, vy, k);
++#endif
++}
++
+ // noinline: inlined into the mul_mat driver these bodies land in a
+ // huge function where the transpiler's loop fusion cannot claim the
+ // block loops; standalone they fuse like the vec_dot kernels.
+@@ -231,3 +299,98 @@ void ggml_gemm_q8_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const vo
      ggml_gemm_q8_0_4x4_q8_0_generic(n, s, bs, vx, vy, nr, nc);
  #endif
  }
@@ -275,3 +188,164 @@ index 9db77fe..d414cd7 100644
 +        }
 +    }
 +}
+diff --git a/ggml/src/ggml-cpu/repack.cpp b/ggml/src/ggml-cpu/repack.cpp
+index 9838c3f57..d9e12b429 100644
+--- a/ggml/src/ggml-cpu/repack.cpp
++++ b/ggml/src/ggml-cpu/repack.cpp
+@@ -3974,6 +3974,60 @@ template <> int repack<block_mxfp4, 8, 8>(struct ggml_tensor * t, const void * d
+     return repack_mxfp4_to_mxfp4_8_bl(t, 8, data, data_size);
+ }
+ 
++#if defined(__wasm_simd128__)
++// Q5_0 -> block_q5_0x8 (see repack.h for the layout).
++static block_q5_0x8 make_block_q5_0x8(const block_q5_0 * in) {
++    block_q5_0x8 out;
++    for (int i = 0; i < 8; i++) {
++        out.d[i] = in[i].d;
++    }
++    for (int i = 0; i < 16; i++) {
++        memcpy(&out.qs[8 * i], &in[i % 8].qs[(i / 8) * 8], 8);
++    }
++    for (int m = 0; m < 8; m++) {
++        const int c0 = 2 * (m % 4);
++        const int b  = m / 4;
++        out.qh[4 * m + 0] = in[c0].qh[b];
++        out.qh[4 * m + 1] = in[c0 + 1].qh[b];
++        out.qh[4 * m + 2] = in[c0].qh[2 + b];
++        out.qh[4 * m + 3] = in[c0 + 1].qh[2 + b];
++    }
++    return out;
++}
++
++static int repack_q5_0_to_q5_0_8_bl(struct ggml_tensor * t, const void * GGML_RESTRICT data, size_t data_size) {
++    GGML_ASSERT(t->type == GGML_TYPE_Q5_0);
++    constexpr int nrows_interleaved = 8;
++
++    block_q5_0x8 *     dst = (block_q5_0x8 *) t->data;
++    const block_q5_0 * src = (const block_q5_0 *) data;
++    block_q5_0         dst_tmp[8];
++    int                nrow    = ggml_nrows(t);
++    int                nblocks = t->ne[0] / QK5_0;
++
++    GGML_ASSERT(data_size == nrow * nblocks * sizeof(block_q5_0));
++
++    if (t->ne[1] % nrows_interleaved != 0 || t->ne[0] % 8 != 0) {
++        return -1;
++    }
++
++    for (int b = 0; b < nrow; b += nrows_interleaved) {
++        for (int64_t x = 0; x < nblocks; x++) {
++            for (int i = 0; i < nrows_interleaved; i++) {
++                dst_tmp[i] = src[x + i * nblocks];
++            }
++            *dst++ = make_block_q5_0x8(dst_tmp);
++        }
++        src += nrows_interleaved * nblocks;
++    }
++    return 0;
++}
++
++template <> int repack<block_q5_0, 8, 8>(struct ggml_tensor * t, const void * data, size_t data_size) {
++    return repack_q5_0_to_q5_0_8_bl(t, data, data_size);
++}
++#endif // __wasm_simd128__
++
+ template <> int repack<block_q8_0, 4, 4>(struct ggml_tensor * t, const void * data, size_t data_size) {
+     return repack_q8_0_to_q8_0_4_bl(t, 4, data, data_size);
+ }
+@@ -4071,6 +4125,12 @@ template <> void gemv<block_mxfp4, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_
+     ggml_gemv_mxfp4_8x8_q8_0(n, s, bs, vx, vy, nr, nc);
+ }
+ 
++#if defined(__wasm_simd128__)
++template <> void gemv<block_q5_0, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_t bs, const void * vx, const void * vy, int nr, int nc) {
++    ggml_gemv_q5_0_8x8_q8_0(n, s, bs, vx, vy, nr, nc);
++}
++#endif
++
+ template <> void gemv<block_q8_0, 4, 4, GGML_TYPE_Q8_0>(int n, float * s, size_t bs, const void * vx, const void * vy, int nr, int nc) {
+     ggml_gemv_q8_0_4x4_q8_0(n, s, bs, vx, vy, nr, nc);
+ }
+@@ -4168,6 +4228,12 @@ template <> void gemm<block_mxfp4, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_
+     ggml_gemm_mxfp4_8x8_q8_0(n, s, bs, vx, vy, nr, nc);
+ }
+ 
++#if defined(__wasm_simd128__)
++template <> void gemm<block_q5_0, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_t bs, const void * vx, const void * vy, int nr, int nc) {
++    ggml_gemm_q5_0_8x8_q8_0(n, s, bs, vx, vy, nr, nc);
++}
++#endif
++
+ template <> void gemm<block_q8_0, 4, 4, GGML_TYPE_Q8_0>(int n, float * s, size_t bs, const void * vx, const void * vy, int nr, int nc) {
+     ggml_gemm_q8_0_4x4_q8_0(n, s, bs, vx, vy, nr, nc);
+ }
+@@ -4604,6 +4670,11 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
+ 
+     // instance for Q8_0
+     static const ggml::cpu::repack::tensor_traits<block_q8_0, 4, 4, GGML_TYPE_Q8_0> q8_0_4x4_q8_0;
++#if defined(__wasm_simd128__)
++    // instance for Q5_0 (wasm: the prompt path otherwise runs per-row vec_dot;
++    // native x86 reaches a GEMM through llamafile sgemm instead)
++    static const ggml::cpu::repack::tensor_traits<block_q5_0, 8, 8, GGML_TYPE_Q8_0> q5_0_8x8_q8_0;
++#endif
+     static const ggml::cpu::repack::tensor_traits<block_q8_0, 8, 4, GGML_TYPE_Q8_0> q8_0_4x8_q8_0;
+ 
+     // instances for RISC-V
+@@ -4768,6 +4839,12 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
+                 return &mxfp4_4x4_q8_0;
+             }
+         }
++#if defined(__wasm_simd128__)
++    } else if (cur->type == GGML_TYPE_Q5_0) {
++        if (cur->ne[1] % 8 == 0) {
++            return &q5_0_8x8_q8_0;
++        }
++#endif
+     } else if (cur->type == GGML_TYPE_Q8_0) {
+         if (ggml_cpu_has_neon() && ggml_cpu_has_matmul_int8()) {
+             if (cur->ne[1] % 4 == 0) {
+diff --git a/ggml/src/ggml-cpu/repack.h b/ggml/src/ggml-cpu/repack.h
+index cb21edf62..581e530c2 100644
+--- a/ggml/src/ggml-cpu/repack.h
++++ b/ggml/src/ggml-cpu/repack.h
+@@ -40,6 +40,24 @@ using block_q8_0x4 = block<8, 4>;
+ using block_q8_0x8 = block<8, 8>;
+ using block_q8_0x16 = block<8, 16>;
+ 
++// Q5_0 repacked eight rows wide (the wasm build's prompt-path layout for
++// Q5_0 tensors; a wasm-to-native transpiler substitutes native GEMV/GEMM
++// bodies for the exported kernels). qs interleaves the eight rows'
++// nibble bytes in 8-byte groups exactly like block_q4_0x8 (group i holds
++// bytes 8*(i/8).. of row i%8; a byte carries element j in its low nibble
++// and element j+16 in its high nibble), without the sign xor: nibbles
++// stay 0..15 and the fifth bit adds 16, the -16 offset is applied by the
++// kernels. qh stores the fifth bits per 16-byte group m (= groups 2m,
++// 2m+1): qh[4m+0], qh[4m+1] are the bits of the two rows' low-nibble
++// elements 8*(m/4)..+8, qh[4m+2], qh[4m+3] those of the high-nibble
++// elements 16 later.
++struct block_q5_0x8 {
++    ggml_half d[8];
++    uint8_t   qh[32];
++    uint8_t   qs[128];
++};
++static_assert(sizeof(block_q5_0x8) == 8 * sizeof(ggml_half) + 32 + 128, "wrong q5_0x8 block size/padding");
++
+ struct block_q4_Kx8 {
+     ggml_half d[8];      // super-block scale for quantized scales
+     ggml_half dmin[8];   // super-block scale for quantized mins
+@@ -155,6 +173,7 @@ void ggml_gemv_iq4_nl_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const
+ void ggml_gemv_iq4_nl_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemv_mxfp4_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemv_mxfp4_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
++void ggml_gemv_q5_0_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemv_q8_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemv_q8_0_4x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemm_q4_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+@@ -171,6 +190,7 @@ void ggml_gemm_iq4_nl_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const
+ void ggml_gemm_iq4_nl_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemm_mxfp4_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemm_mxfp4_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
++void ggml_gemm_q5_0_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemm_q8_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ void ggml_gemm_q8_0_4x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+ #if defined __riscv_zvfh

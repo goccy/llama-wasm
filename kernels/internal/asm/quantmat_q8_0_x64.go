@@ -8,8 +8,9 @@ import (
 )
 
 // x64QuantizeMatQ8_0_4x8Kernel: the AVX2 twin of
-// a64QuantizeMatQ8_0_4x8Kernel. roundf's ties-away rounding is
-// trunc(x + copysign(0.5, x)) (VCVTTPS2DQ after adding a signed half).
+// a64QuantizeMatQ8_0_4x8Kernel. Quants round to nearest even
+// (VCVTPS2DQ under the default MXCSR), matching quantize_row_q8_0 and
+// the native SIMD quantizers; see the arm64 twin for why.
 //
 // Registers: SI x (block, advancing), DI vy (block, advancing), CX row
 // stride bytes, DX blocks left, R8 rows left, R9 row's block start, R10
@@ -26,8 +27,6 @@ func x64QuantizeMatQ8_0_4x8Kernel(sym string, pool *ConstPool, wide bool) string
 		return "·" + pool.addBlob(b) + "(SB)"
 	}
 	cAbs := rep(0x7fffffff)
-	cSign := rep(0x80000000)
-	cHalf := rep(math.Float32bits(0.5))
 	c127 := rep(math.Float32bits(127))
 	c1 := rep(math.Float32bits(1))
 	args, _ := quantMatArgs(wide)
@@ -35,7 +34,7 @@ func x64QuantizeMatQ8_0_4x8Kernel(sym string, pool *ConstPool, wide bool) string
 	if wide {
 		movPtr = "MOVQ"
 	}
-	w("// %s: quantize four f32 rows into block_q8_0x4 (VMAXPS amax, ties-away VCVTTPS2DQ quants).", sym)
+	w("// %s: quantize four f32 rows into block_q8_0x4 (VMAXPS amax, nearest-even VCVTPS2DQ quants).", sym)
 	w("\t%s\tl0+%d(FP), SI", movPtr, args["l0"])
 	w("\t%s\tl1+%d(FP), DI", movPtr, args["l1"])
 	w("\tMOVQ\tl2+%d(FP), CX", args["l2"])
@@ -88,10 +87,7 @@ func x64QuantizeMatQ8_0_4x8Kernel(sym string, pool *ConstPool, wide bool) string
 	w("\tVBROADCASTSS\tX8, Y8")
 	for k := 0; k < 4; k++ {
 		w("\tVMULPS\tY8, Y%d, Y4", k)
-		w("\tVANDPS\t%s, Y4, Y5", cSign)
-		w("\tVORPS\t%s, Y5, Y5", cHalf)
-		w("\tVADDPS\tY5, Y4, Y4")
-		w("\tVCVTTPS2DQ\tY4, Y4")
+		w("\tVCVTPS2DQ\tY4, Y4")
 		w("\tVEXTRACTI128\t$1, Y4, X5")
 		w("\tVPACKSSDW\tX5, X4, X4")
 		w("\tVPACKSSWB\tX4, X4, X4")

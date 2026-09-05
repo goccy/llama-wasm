@@ -61,32 +61,32 @@ q8mscale:
 	WORD $0x4e040529 // dup v9.4s, v9.s[0]
 	WORD $0x6e29dc0a // fmul v10.4s, v0.4s, v9.4s
 	WORD $0x6e29dc2b // fmul v11.4s, v1.4s, v9.4s
-	WORD $0x4e21c94a // fcvtas v10.4s, v10.4s
-	WORD $0x4e21c96b // fcvtas v11.4s, v11.4s
+	WORD $0x4e21a94a // fcvtns v10.4s, v10.4s
+	WORD $0x4e21a96b // fcvtns v11.4s, v11.4s
 	WORD $0x0e61494c // sqxtn v12.4h, v10.4s
 	WORD $0x4e61496c // sqxtn2 v12.8h, v11.4s
 	WORD $0x0e21498d // sqxtn v13.8b, v12.8h
 	WORD $0xfd0004ed // str d13, [x7, #8]
 	WORD $0x6e29dc4a // fmul v10.4s, v2.4s, v9.4s
 	WORD $0x6e29dc6b // fmul v11.4s, v3.4s, v9.4s
-	WORD $0x4e21c94a // fcvtas v10.4s, v10.4s
-	WORD $0x4e21c96b // fcvtas v11.4s, v11.4s
+	WORD $0x4e21a94a // fcvtns v10.4s, v10.4s
+	WORD $0x4e21a96b // fcvtns v11.4s, v11.4s
 	WORD $0x0e61494c // sqxtn v12.4h, v10.4s
 	WORD $0x4e61496c // sqxtn2 v12.8h, v11.4s
 	WORD $0x0e21498d // sqxtn v13.8b, v12.8h
 	WORD $0xfd0014ed // str d13, [x7, #40]
 	WORD $0x6e29dc8a // fmul v10.4s, v4.4s, v9.4s
 	WORD $0x6e29dcab // fmul v11.4s, v5.4s, v9.4s
-	WORD $0x4e21c94a // fcvtas v10.4s, v10.4s
-	WORD $0x4e21c96b // fcvtas v11.4s, v11.4s
+	WORD $0x4e21a94a // fcvtns v10.4s, v10.4s
+	WORD $0x4e21a96b // fcvtns v11.4s, v11.4s
 	WORD $0x0e61494c // sqxtn v12.4h, v10.4s
 	WORD $0x4e61496c // sqxtn2 v12.8h, v11.4s
 	WORD $0x0e21498d // sqxtn v13.8b, v12.8h
 	WORD $0xfd0024ed // str d13, [x7, #72]
 	WORD $0x6e29dcca // fmul v10.4s, v6.4s, v9.4s
 	WORD $0x6e29dceb // fmul v11.4s, v7.4s, v9.4s
-	WORD $0x4e21c94a // fcvtas v10.4s, v10.4s
-	WORD $0x4e21c96b // fcvtas v11.4s, v11.4s
+	WORD $0x4e21a94a // fcvtns v10.4s, v10.4s
+	WORD $0x4e21a96b // fcvtns v11.4s, v11.4s
 	WORD $0x0e61494c // sqxtn v12.4h, v10.4s
 	WORD $0x4e61496c // sqxtn2 v12.8h, v11.4s
 	WORD $0x0e21498d // sqxtn v13.8b, v12.8h
