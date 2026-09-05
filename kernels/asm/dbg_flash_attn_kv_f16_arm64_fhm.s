@@ -552,64 +552,7 @@ fhmscored:
 	BEQ	fhmadvance
 	WORD $0xbd40055f // ldr s31, [x10, #4]
 	WORD $0x1e3f23c0 // fcmp s30, s31
-	BLE	fhmnorescale
-	WORD $0xbd00055e // str s30, [x10, #4]
-	WORD $0x1e2623e0 // fcmp s31, s6
-	BEQ	fhmnewm
-	WORD $0x3d804262 // str q2, [x19, #256]
-	WORD $0x3d804663 // str q3, [x19, #272]
-	WORD $0x1e3e3be0 // fsub s0, s31, s30
-	WORD $0x4e040400 // dup v0.4s, v0.s[0]
-	WORD $0x4eae1dc1 // mov v1.16b, v14.16b
-	WORD $0x4fb41001 // fmla v1.4s, v0.4s, v20.s[1]
-	WORD $0x4eaed422 // fsub v2.4s, v1.4s, v14.4s
-	WORD $0x4ea01c03 // mov v3.16b, v0.16b
-	WORD $0x4f945843 // fmls v3.4s, v2.4s, v20.s[2]
-	WORD $0x4fb45843 // fmls v3.4s, v2.4s, v20.s[3]
-	WORD $0x4f375424 // shl v4.4s, v1.4s, #23
-	WORD $0x4eb18485 // add v5.4s, v4.4s, v17.4s
-	WORD $0x4ea0f846 // fabs v6.4s, v2.4s
-	WORD $0x6eb3e4c7 // fcmgt v7.4s, v6.4s, v19.4s
-	WORD $0x6e23dc68 // fmul v8.4s, v3.4s, v3.4s
-	WORD $0x4ead1da9 // mov v9.16b, v13.16b
-	WORD $0x4f951069 // fmla v9.4s, v3.4s, v21.s[0]
-	WORD $0x4eac1d8a // mov v10.16b, v12.16b
-	WORD $0x4f95186a // fmla v10.4s, v3.4s, v21.s[2]
-	WORD $0x4e28cd2a // fmla v10.4s, v9.4s, v8.4s
-	WORD $0x4f96906b // fmul v11.4s, v3.4s, v22.s[0]
-	WORD $0x4e28cd4b // fmla v11.4s, v10.4s, v8.4s
-	WORD $0x4ea51ca9 // mov v9.16b, v5.16b
-	WORD $0x4e25cd69 // fmla v9.4s, v11.4s, v5.4s
-	WORD $0x6ea0d841 // fcmle v1.4s, v2.4s, #0.0
-	WORD $0x4e301c21 // and v1.16b, v1.16b, v16.16b
-	WORD $0x4eaf8423 // add v3.4s, v1.4s, v15.4s
-	WORD $0x6ea18488 // sub v8.4s, v4.4s, v1.4s
-	WORD $0x4ea81d0a // mov v10.16b, v8.16b
-	WORD $0x4e2bcd0a // fmla v10.4s, v8.4s, v11.4s
-	WORD $0x6e23dd4a // fmul v10.4s, v10.4s, v3.4s
-	WORD $0x6e23dc65 // fmul v5.4s, v3.4s, v3.4s
-	WORD $0x6eb2e4c2 // fcmgt v2.4s, v6.4s, v18.4s
-	WORD $0x6e691d47 // bsl v7.16b, v10.16b, v9.16b
-	WORD $0x6e671ca2 // bsl v2.16b, v5.16b, v7.16b
-	WORD $0x4ea21c40 // mov v0.16b, v2.16b
-	WORD $0x3dc04262 // ldr q2, [x19, #256]
-	WORD $0x3dc04663 // ldr q3, [x19, #272]
-	WORD $0xbd400141 // ldr s1, [x10, #0]
-	WORD $0x1e200821 // fmul s1, s1, s0
-	WORD $0xbd000141 // str s1, [x10, #0]
-	WORD $0x1e23c000 // fcvt h0, s0
-	MOVD	R19, R14
-	MOVW	R16, R15
-fhmrescale:
-	WORD $0x3dc001c1 // ldr q1, [x14, #0]
-	WORD $0x4f009021 // fmul v1.8h, v1.8h, v0.h[0]
-	WORD $0x3d8001c1 // str q1, [x14, #0]
-	ADD	$16, R14, R14
-	SUBW	$1, R15, R15
-	CBNZW	R15, fhmrescale
-fhmnewm:
-	FMOVS	F30, F31
-fhmnorescale:
+	BGT	fhmexact
 	WORD $0x4e0407e6 // dup v6.4s, v31.s[0]
 	WORD $0x4ea6d442 // fsub v2.4s, v2.4s, v6.4s
 	WORD $0x4ea6d463 // fsub v3.4s, v3.4s, v6.4s
@@ -688,10 +631,22 @@ fhmnorescale:
 	WORD $0x4ea21c40 // mov v0.16b, v2.16b
 	WORD $0x4ea01c03 // mov v3.16b, v0.16b
 	WORD $0x3dc04262 // ldr q2, [x19, #256]
-	WORD $0x4e23d440 // fadd v0.4s, v2.4s, v3.4s
-	WORD $0x6e20d400 // faddp v0.4s, v0.4s, v0.4s
-	WORD $0x7e30d800 // faddp s0, v0.2s
 	WORD $0xbd400141 // ldr s1, [x10, #0]
+	WORD $0x5e040440 // mov s0, v2.s[0]
+	WORD $0x1e202821 // fadd s1, s1, s0
+	WORD $0x5e0c0440 // mov s0, v2.s[1]
+	WORD $0x1e202821 // fadd s1, s1, s0
+	WORD $0x5e140440 // mov s0, v2.s[2]
+	WORD $0x1e202821 // fadd s1, s1, s0
+	WORD $0x5e1c0440 // mov s0, v2.s[3]
+	WORD $0x1e202821 // fadd s1, s1, s0
+	WORD $0x5e040460 // mov s0, v3.s[0]
+	WORD $0x1e202821 // fadd s1, s1, s0
+	WORD $0x5e0c0460 // mov s0, v3.s[1]
+	WORD $0x1e202821 // fadd s1, s1, s0
+	WORD $0x5e140460 // mov s0, v3.s[2]
+	WORD $0x1e202821 // fadd s1, s1, s0
+	WORD $0x5e1c0460 // mov s0, v3.s[3]
 	WORD $0x1e202821 // fadd s1, s1, s0
 	WORD $0xbd000141 // str s1, [x10, #0]
 	WORD $0x0e21684a // fcvtn v10.4h, v2.4s
@@ -872,6 +827,134 @@ fhmhalfdone:
 	ADD	$128, R24, R24
 	SUBW	$1, R25, R25
 	CBNZW	R25, fhmhalf
+	B	fhmadvance
+fhmexact:
+	WORD $0x3d804262 // str q2, [x19, #256]
+	WORD $0x3d804663 // str q3, [x19, #272]
+	ADD	$256, R19, R24
+	MOVD	R6, R25
+	MOVW	R12, R26
+fhmpos:
+	FMOVS	(R24), F0
+	MOVW	$0xff800000, R27
+	WORD $0x1e270366 // fmov s6, w27
+	WORD $0x1e262000 // fcmp s0, s6
+	BEQ	fhmposnext
+	MOVW	$0xc3480000, R27
+	WORD $0x1e270367 // fmov s7, w27
+	WORD $0x1e3f2000 // fcmp s0, s31
+	BLE	fhmposkeep
+	FMOVS	F0, F29
+	WORD $0x1e3d3be0 // fsub s0, s31, s29
+	WORD $0x1e274800 // fmax s0, s0, s7
+	WORD $0x4e040400 // dup v0.4s, v0.s[0]
+	WORD $0x4eae1dc1 // mov v1.16b, v14.16b
+	WORD $0x4fb41001 // fmla v1.4s, v0.4s, v20.s[1]
+	WORD $0x4eaed422 // fsub v2.4s, v1.4s, v14.4s
+	WORD $0x4ea01c03 // mov v3.16b, v0.16b
+	WORD $0x4f945843 // fmls v3.4s, v2.4s, v20.s[2]
+	WORD $0x4fb45843 // fmls v3.4s, v2.4s, v20.s[3]
+	WORD $0x4f375424 // shl v4.4s, v1.4s, #23
+	WORD $0x4eb18485 // add v5.4s, v4.4s, v17.4s
+	WORD $0x4ea0f846 // fabs v6.4s, v2.4s
+	WORD $0x6eb3e4c7 // fcmgt v7.4s, v6.4s, v19.4s
+	WORD $0x6e23dc68 // fmul v8.4s, v3.4s, v3.4s
+	WORD $0x4ead1da9 // mov v9.16b, v13.16b
+	WORD $0x4f951069 // fmla v9.4s, v3.4s, v21.s[0]
+	WORD $0x4eac1d8a // mov v10.16b, v12.16b
+	WORD $0x4f95186a // fmla v10.4s, v3.4s, v21.s[2]
+	WORD $0x4e28cd2a // fmla v10.4s, v9.4s, v8.4s
+	WORD $0x4f96906b // fmul v11.4s, v3.4s, v22.s[0]
+	WORD $0x4e28cd4b // fmla v11.4s, v10.4s, v8.4s
+	WORD $0x4ea51ca9 // mov v9.16b, v5.16b
+	WORD $0x4e25cd69 // fmla v9.4s, v11.4s, v5.4s
+	WORD $0x6ea0d841 // fcmle v1.4s, v2.4s, #0.0
+	WORD $0x4e301c21 // and v1.16b, v1.16b, v16.16b
+	WORD $0x4eaf8423 // add v3.4s, v1.4s, v15.4s
+	WORD $0x6ea18488 // sub v8.4s, v4.4s, v1.4s
+	WORD $0x4ea81d0a // mov v10.16b, v8.16b
+	WORD $0x4e2bcd0a // fmla v10.4s, v8.4s, v11.4s
+	WORD $0x6e23dd4a // fmul v10.4s, v10.4s, v3.4s
+	WORD $0x6e23dc65 // fmul v5.4s, v3.4s, v3.4s
+	WORD $0x6eb2e4c2 // fcmgt v2.4s, v6.4s, v18.4s
+	WORD $0x6e691d47 // bsl v7.16b, v10.16b, v9.16b
+	WORD $0x6e671ca2 // bsl v2.16b, v5.16b, v7.16b
+	WORD $0x4ea21c40 // mov v0.16b, v2.16b
+	WORD $0xbd400141 // ldr s1, [x10, #0]
+	WORD $0x1e200821 // fmul s1, s1, s0
+	WORD $0xbd000141 // str s1, [x10, #0]
+	WORD $0x1e23c000 // fcvt h0, s0
+	MOVD	R19, R14
+	MOVW	R16, R15
+fhmposscale:
+	WORD $0x3dc001c1 // ldr q1, [x14, #0]
+	WORD $0x4f009021 // fmul v1.8h, v1.8h, v0.h[0]
+	WORD $0x3d8001c1 // str q1, [x14, #0]
+	ADD	$16, R14, R14
+	SUBW	$1, R15, R15
+	CBNZW	R15, fhmposscale
+	FMOVS	F29, F31
+	WORD $0xbd00055f // str s31, [x10, #4]
+	FMOVS	$1.0, F0
+	B	fhmposacc
+fhmposkeep:
+	WORD $0x1e3f3800 // fsub s0, s0, s31
+	WORD $0x1e274800 // fmax s0, s0, s7
+	WORD $0x4e040400 // dup v0.4s, v0.s[0]
+	WORD $0x4eae1dc1 // mov v1.16b, v14.16b
+	WORD $0x4fb41001 // fmla v1.4s, v0.4s, v20.s[1]
+	WORD $0x4eaed422 // fsub v2.4s, v1.4s, v14.4s
+	WORD $0x4ea01c03 // mov v3.16b, v0.16b
+	WORD $0x4f945843 // fmls v3.4s, v2.4s, v20.s[2]
+	WORD $0x4fb45843 // fmls v3.4s, v2.4s, v20.s[3]
+	WORD $0x4f375424 // shl v4.4s, v1.4s, #23
+	WORD $0x4eb18485 // add v5.4s, v4.4s, v17.4s
+	WORD $0x4ea0f846 // fabs v6.4s, v2.4s
+	WORD $0x6eb3e4c7 // fcmgt v7.4s, v6.4s, v19.4s
+	WORD $0x6e23dc68 // fmul v8.4s, v3.4s, v3.4s
+	WORD $0x4ead1da9 // mov v9.16b, v13.16b
+	WORD $0x4f951069 // fmla v9.4s, v3.4s, v21.s[0]
+	WORD $0x4eac1d8a // mov v10.16b, v12.16b
+	WORD $0x4f95186a // fmla v10.4s, v3.4s, v21.s[2]
+	WORD $0x4e28cd2a // fmla v10.4s, v9.4s, v8.4s
+	WORD $0x4f96906b // fmul v11.4s, v3.4s, v22.s[0]
+	WORD $0x4e28cd4b // fmla v11.4s, v10.4s, v8.4s
+	WORD $0x4ea51ca9 // mov v9.16b, v5.16b
+	WORD $0x4e25cd69 // fmla v9.4s, v11.4s, v5.4s
+	WORD $0x6ea0d841 // fcmle v1.4s, v2.4s, #0.0
+	WORD $0x4e301c21 // and v1.16b, v1.16b, v16.16b
+	WORD $0x4eaf8423 // add v3.4s, v1.4s, v15.4s
+	WORD $0x6ea18488 // sub v8.4s, v4.4s, v1.4s
+	WORD $0x4ea81d0a // mov v10.16b, v8.16b
+	WORD $0x4e2bcd0a // fmla v10.4s, v8.4s, v11.4s
+	WORD $0x6e23dd4a // fmul v10.4s, v10.4s, v3.4s
+	WORD $0x6e23dc65 // fmul v5.4s, v3.4s, v3.4s
+	WORD $0x6eb2e4c2 // fcmgt v2.4s, v6.4s, v18.4s
+	WORD $0x6e691d47 // bsl v7.16b, v10.16b, v9.16b
+	WORD $0x6e671ca2 // bsl v2.16b, v5.16b, v7.16b
+	WORD $0x4ea21c40 // mov v0.16b, v2.16b
+fhmposacc:
+	WORD $0xbd400141 // ldr s1, [x10, #0]
+	WORD $0x1e202821 // fadd s1, s1, s0
+	WORD $0xbd000141 // str s1, [x10, #0]
+	WORD $0x1e23c000 // fcvt h0, s0
+	MOVD	R19, R14
+	MOVD	R25, R13
+	MOVW	R16, R15
+fhmposmad:
+	WORD $0x3dc001a1 // ldr q1, [x13, #0]
+	WORD $0x3dc001c2 // ldr q2, [x14, #0]
+	WORD $0x4f001022 // fmla v2.8h, v1.8h, v0.h[0]
+	WORD $0x3d8001c2 // str q2, [x14, #0]
+	ADD	$16, R13, R13
+	ADD	$16, R14, R14
+	SUBW	$1, R15, R15
+	CBNZW	R15, fhmposmad
+fhmposnext:
+	ADD	$4, R24, R24
+	ADD	R7, R25, R25
+	SUBW	$1, R26, R26
+	CBNZW	R26, fhmpos
 fhmadvance:
 	MADD	R5, R4, R12, R4
 	MADD	R7, R6, R12, R6

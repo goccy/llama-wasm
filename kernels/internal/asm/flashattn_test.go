@@ -736,69 +736,50 @@ func runAttn(t *testing.T, kernel attnKernel, DK, DV, n, start, pad int, withMas
 		}
 		return
 	}
-	// reference: the kernel's arithmetic, step for step (blocks of eight,
-	// f32 FMLAL dot, its expf polynomial, f16 weights, f16 accumulation
-	// with one rounding per fused multiply-add - ggml's native NEON path
-	// keeps the same f16 accumulator).
+	// reference: the kernel's arithmetic, step for step (the per-position
+	// recurrence with an f32 FMLAL dot, its expf polynomial, f16 weights
+	// and f16 accumulation with one rounding per fused multiply-add -
+	// ggml's native NEON path keeps the same f16 accumulator). The
+	// kernel's blocking is a schedule, not arithmetic: a block without a
+	// new max computes exactly these steps.
 	S32, M32 := float32(S), float32(M)
 	vkq16 := make([]uint16, DV)
 	for i := range vkq {
 		vkq16[i] = f16bits(float32(vkq[i]))
 	}
-	for p0 := start; p0 < n; p0 += 8 {
-		nb := n - p0
-		if nb > 8 {
-			nb = 8
+	for p := start; p < n; p++ {
+		mv := float32(0)
+		if withMask {
+			mv = slope * float32(mask[p])
 		}
-		sv := make([]float32, 8)
-		mb := float32(math.Inf(-1))
-		for j := 0; j < 8; j++ {
-			sv[j] = float32(math.Inf(-1))
-			if j >= nb {
-				continue
-			}
-			p := p0 + j
-			mv := float32(0)
-			if withMask {
-				mv = slope * float32(mask[p])
-			}
-			sv[j] = fma32(dotFMLAL(k[p], q, DK), scale, mv)
-			if sv[j] > mb {
-				mb = sv[j]
-			}
-		}
-		if math.IsInf(float64(mb), -1) {
+		if math.IsInf(float64(mv), -1) {
 			continue
 		}
-		if mb > M32 {
-			if !math.IsInf(float64(M32), -1) {
-				ms := expf32(M32 - mb)
-				S32 *= ms
-				ms16 := f16val(f16of(float64(ms)))
-				for i := range vkq16 {
-					vkq16[i] = f16of(f16val(vkq16[i]) * ms16)
-				}
-			}
-			M32 = mb
-		}
-		var pw [8]float32
-		for j := 0; j < 8; j++ {
-			x := sv[j] - M32
+		sv := fma32(dotFMLAL(k[p], q, DK), scale, mv)
+		vs := float32(1)
+		if sv > M32 {
+			x := M32 - sv
 			if x < -200 {
 				x = -200
 			}
-			pw[j] = expf32(x)
-		}
-		var sum [4]float32
-		for l := 0; l < 4; l++ {
-			sum[l] = pw[l] + pw[4+l]
-		}
-		S32 += (sum[0] + sum[1]) + (sum[2] + sum[3])
-		for j := 0; j < nb; j++ {
-			p16 := f16val(f16of(float64(pw[j])))
+			ms := expf32(x)
+			S32 *= ms
+			ms16 := f16val(f16of(float64(ms)))
 			for i := range vkq16 {
-				vkq16[i] = f16of(f16val(vkq16[i]) + p16*v[p0+j][i])
+				vkq16[i] = f16of(f16val(vkq16[i]) * ms16)
 			}
+			M32 = sv
+		} else {
+			x := sv - M32
+			if x < -200 {
+				x = -200
+			}
+			vs = expf32(x)
+		}
+		S32 += vs
+		p16 := f16val(f16of(float64(vs)))
+		for i := range vkq16 {
+			vkq16[i] = f16of(f16val(vkq16[i]) + p16*v[p][i])
 		}
 	}
 	S, M = float64(S32), float64(M32)
@@ -853,11 +834,112 @@ func itoa(i int) string {
 	}
 	return string(b)
 }
+
+// runAttnLayout runs the kernel over n real positions from a fresh state,
+// with one fully masked row (junk K and V, mask -inf) inserted before each
+// real index listed in holes, and returns the bytes of S, M and VKQ. A
+// masked position contributes nothing, so the result must not depend on
+// holes: the kernel's block-of-eight schedule must not leak into the
+// arithmetic (a unified KV cache places a sequence's cells at arbitrary
+// offsets, and the same sequence must score identically wherever it sits).
+func runAttnLayout(t *testing.T, kernel attnKernel, DK, DV, n int, holes []int, seed uint32) []byte {
+	t.Helper()
+	total := n + len(holes)
+	s := lcg(seed)
+	nbk, nbv := 2*DK, 2*DV
+	qOff := 256
+	kOff := qOff + 2*DK + 64
+	vOff := kOff + total*nbk + 64
+	mOff := vOff + total*nbv + 64
+	smOff := mOff + 2*total + 64
+	vkqOff := smOff + 64
+	argOff := vkqOff + 4*DV + 64
+	mem := make([]byte, argOff+96+256)
+	for i := 0; i < DK; i++ {
+		put16(mem, qOff+2*i, f16bits(float32(s.unit()*0.5)))
+	}
+	// the real rows come from the seed in order, so every layout sees the
+	// same rows
+	krow := make([][]uint16, n)
+	vrow := make([][]uint16, n)
+	mrow := make([]uint16, n)
+	for r := 0; r < n; r++ {
+		krow[r] = make([]uint16, DK)
+		vrow[r] = make([]uint16, DV)
+		for i := range krow[r] {
+			krow[r][i] = f16bits(float32(s.unit() * 0.5))
+		}
+		for i := range vrow[r] {
+			vrow[r][i] = f16bits(float32(s.unit()))
+		}
+		if r%5 == 2 {
+			mrow[r] = f16bits(float32(s.unit() * 0.25))
+		}
+	}
+	// a hole index of n (or beyond) appends the masked row after the last
+	// real one
+	junk := lcg(seed ^ 0x9e3779b9)
+	p := 0
+	for r := 0; r <= n; r++ {
+		for _, h := range holes {
+			if h > n {
+				h = n
+			}
+			if h != r {
+				continue
+			}
+			for i := 0; i < DK; i++ {
+				put16(mem, kOff+p*nbk+2*i, f16bits(float32(junk.unit())))
+			}
+			for i := 0; i < DV; i++ {
+				put16(mem, vOff+p*nbv+2*i, f16bits(float32(junk.unit())))
+			}
+			put16(mem, mOff+2*p, 0xfc00)
+			p++
+		}
+		if r == n {
+			break
+		}
+		for i := 0; i < DK; i++ {
+			put16(mem, kOff+p*nbk+2*i, krow[r][i])
+		}
+		for i := 0; i < DV; i++ {
+			put16(mem, vOff+p*nbv+2*i, vrow[r][i])
+		}
+		put16(mem, mOff+2*p, mrow[r])
+		p++
+	}
+	put32(mem, smOff, 0)
+	put32(mem, smOff+4, float32(math.Inf(-1)))
+	memSize := uint64(len(mem))
+	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	put64(mem, argOff+0, uint64(qOff))
+	put64(mem, argOff+8, uint64(kOff))
+	put64(mem, argOff+16, uint64(nbk))
+	put64(mem, argOff+24, uint64(vOff))
+	put64(mem, argOff+32, uint64(nbv))
+	put64(mem, argOff+40, uint64(mOff))
+	put64(mem, argOff+48, uint64(smOff))
+	put64(mem, argOff+56, uint64(vkqOff))
+	put64(mem, argOff+64, 0)
+	put64(mem, argOff+72, uint64(total))
+	put32(mem, argOff+80, 0.5)
+	put32(mem, argOff+84, 0.125)
+	put64(mem, argOff+88, uint64(uint32(DK))|uint64(uint32(DV))<<32)
+	kernel(m, int64(argOff))
+	out := make([]byte, 8+4*DV)
+	copy(out, mem[smOff:smOff+8])
+	copy(out[8:], mem[vkqOff:vkqOff+4*DV])
+	return out
+}
 `
 
 const flashAttnFHMRunTest = `package attnrun
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestFlashAttn(t *testing.T) {
 	seed := uint32(17)
@@ -879,6 +961,23 @@ func TestFlashAttn(t *testing.T) {
 		}
 	}
 	runAttn(t, AttnKernel, 64, 64, 4, 4, 0, false, true, 99)
+}
+
+// TestFlashAttnLayoutInvariance: masked rows inserted anywhere must leave
+// S, M and VKQ bit-identical.
+func TestFlashAttnLayoutInvariance(t *testing.T) {
+	seed := uint32(101)
+	for _, d := range [][2]int{{64, 64}, {128, 128}, {16, 32}, {24, 40}, {64, 128}} {
+		for _, n := range []int{1, 3, 8, 13, 40} {
+			seed++
+			want := runAttnLayout(t, AttnKernel, d[0], d[1], n, nil, seed)
+			for _, holes := range [][]int{{0}, {0, 0, 0}, {0, 0, 0, 0, 0, 0, 0}, {n / 2}, {1, 1, n - 1}, {n}, {n, n, n, n, n}, {0, 0, 0, 0, 0, n / 2, n / 2, n / 2, n}} {
+				if got := runAttnLayout(t, AttnKernel, d[0], d[1], n, holes, seed); !bytes.Equal(got, want) {
+					t.Fatalf("DK=%d DV=%d n=%d holes=%v: result depends on the layout of masked rows\n got %x\nwant %x", d[0], d[1], n, holes, got, want)
+				}
+			}
+		}
+	}
 }
 `
 

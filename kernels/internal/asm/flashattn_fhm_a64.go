@@ -14,7 +14,10 @@ import (
 //     widening), one 16-byte load of K and of Q per eight elements.
 //   - The block's eight scores take one vectorized exp (two 4-lane
 //     calls) instead of one per position; masked (-inf) positions and
-//     the lanes past the block end contribute exp(-200) = 0.
+//     the lanes past the block end contribute exp(-200) = 0. A block
+//     that raises the running max instead replays the per-position
+//     recurrence (rescale at the position that raises the max), so the
+//     numerics never depend on how positions fall into blocks.
 //   - The softmax weights are rounded to f16 once and V is accumulated
 //     in f16 registers with FMLA by element (the native path's VKQ16),
 //     64 elements resident at a time; the f32 VKQ32 state converts to
@@ -66,6 +69,9 @@ func a64FlashAttnFHMKernel(sym string, pool *ConstPool, wide bool) string {
 		word(0x4E20F400|lane3(d, n, m), fmt.Sprintf("fmax v%d.4s, v%d.4s, v%d.4s", d, n, m))
 	}
 	faddS := func(d, n, m int) { word(0x1E202800|lane3(d, n, m), fmt.Sprintf("fadd s%d, s%d, s%d", d, n, m)) }
+	dupSLane := func(d, n, idx int) {
+		word(0x5E000400|uint32(idx<<3|4)<<16|uint32(n)<<5|uint32(d), fmt.Sprintf("mov s%d, v%d.s[%d]", d, n, idx))
+	}
 	fmovSW := func(d, n int) { word(0x1E270000|uint32(n)<<5|uint32(d), fmt.Sprintf("fmov s%d, w%d", d, n)) }
 	movi4s0 := func(d int) { word(0x4F000400|uint32(d), fmt.Sprintf("movi v%d.4s, #0", d)) }
 	movV := func(d, n int) {
@@ -170,40 +176,19 @@ func a64FlashAttnFHMKernel(sym string, pool *ConstPool, wide bool) string {
 	fmovSW(6, 27)
 	f.fcmpS(30, 6)
 	w("\tBEQ\tfhmadvance")
-	// M_old (s31); a new max rescales the f16 accumulator and S
+	// M (s31). A block holding a new max takes the per-position path
+	// below: the rescale then happens at the position it belongs to, as
+	// in the per-position recurrence, so the result is the same however
+	// the positions fall into blocks (a kernel whose numerics depended on
+	// block alignment would score a sequence differently depending on
+	// where its cells sit in a unified KV cache).
 	f.ldrS(31, 10, 4)
 	f.fcmpS(30, 31)
-	w("\tBLE\tfhmnorescale")
-	f.strS(30, 10, 4)
-	f.fcmpS(31, 6)
-	w("\tBEQ\tfhmnewm") // M_old = -inf: nothing accumulated yet
-	// (the exp clobbers v1..v11: park the scores in scratch meanwhile)
-	strQ(2, 19, faFHMScores)
-	strQ(3, 19, faFHMScores+16)
-	f.fsubS(0, 31, 30)
-	f.dupS0(0, 0)
-	e.exp(0, 0) // ms
-	ldrQ(2, 19, faFHMScores)
-	ldrQ(3, 19, faFHMScores+16)
-	f.ldrS(1, 10, 0)
-	f.fmulS(1, 1, 0)
-	f.strS(1, 10, 0)
-	fcvtHS(0, 0)
-	w("\tMOVD\tR19, R14")
-	w("\tMOVW\tR16, R15")
-	w("fhmrescale:")
-	ldrQ(1, 14, 0)
-	fmul8hLane(1, 1, 0, 0)
-	strQ(1, 14, 0)
-	w("\tADD\t$16, R14, R14")
-	w("\tSUBW\t$1, R15, R15")
-	w("\tCBNZW\tR15, fhmrescale")
-	w("fhmnewm:")
-	w("\tFMOVS\tF30, F31")
-	w("fhmnorescale:")
-	// p = exp(max(s - M, -200)): masked lanes and the lanes past the
-	// block end flush to zero. The exp routine clobbers v1..v11, so the
-	// second score vector waits in scratch.
+	w("\tBGT\tfhmexact")
+	// ---- fast path (no new max): p = exp(max(s - M, -200)); masked
+	// lanes and the lanes past the block end flush to zero. The exp
+	// routine clobbers v1..v11, so the second score vector waits in
+	// scratch.
 	f.dupS0(6, 31)
 	e.fsubV(2, 2, 6)
 	e.fsubV(3, 3, 6)
@@ -221,12 +206,13 @@ func a64FlashAttnFHMKernel(sym string, pool *ConstPool, wide bool) string {
 	e.exp(0, 0)
 	movV(3, 0)
 	ldrQ(2, 19, faFHMScores)
-	// S += sum(p)
-	e.faddV(0, 2, 3)
-	q.faddp4s(0, 0, 0)
-	q.faddpS(0, 0)
+	// S += p_i, one position at a time in order (the recurrence's own
+	// summation order; a zero lane leaves S unchanged)
 	f.ldrS(1, 10, 0)
-	faddS(1, 1, 0)
+	for i := 0; i < faFHMBlock; i++ {
+		dupSLane(0, 2+i/4, i%4)
+		faddS(1, 1, 0)
+	}
 	f.strS(1, 10, 0)
 	// p as eight halves in v10
 	fcvtn(10, 2)
@@ -259,6 +245,82 @@ func a64FlashAttnFHMKernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tADD\t$128, R24, R24")
 	w("\tSUBW\t$1, R25, R25")
 	w("\tCBNZW\tR25, fhmhalf")
+	w("\tB\tfhmadvance")
+	// ---- exact path: the per-position recurrence over the block's
+	// scores (parked in scratch). Per position: a masked score is
+	// skipped; a new max rescales S and the f16 accumulator by
+	// ms = exp(M - s) and contributes with weight 1; otherwise the weight
+	// is exp(s - M). The accumulator is updated in place in scratch.
+	// R24 score pointer, R25 V row, R26 positions left; s29 the new max,
+	// s31 M (v24..v29 are free here: no half is resident).
+	w("fhmexact:")
+	strQ(2, 19, faFHMScores)
+	strQ(3, 19, faFHMScores+16)
+	w("\tADD\t$%d, R19, R24", faFHMScores)
+	w("\tMOVD\tR6, R25")
+	w("\tMOVW\tR12, R26")
+	w("fhmpos:")
+	w("\tFMOVS\t(R24), F0")
+	w("\tMOVW\t$0xff800000, R27")
+	fmovSW(6, 27)
+	f.fcmpS(0, 6)
+	w("\tBEQ\tfhmposnext")
+	w("\tMOVW\t$0xc3480000, R27") // -200.0f
+	fmovSW(7, 27)
+	f.fcmpS(0, 31)
+	w("\tBLE\tfhmposkeep")
+	// new max: ms = exp(max(M - s, -200)); S *= ms; VKQ16 *= f16(ms); M = s
+	w("\tFMOVS\tF0, F29")
+	f.fsubS(0, 31, 29)
+	fmaxS(0, 0, 7)
+	f.dupS0(0, 0)
+	e.exp(0, 0)
+	f.ldrS(1, 10, 0)
+	f.fmulS(1, 1, 0)
+	f.strS(1, 10, 0)
+	fcvtHS(0, 0)
+	w("\tMOVD\tR19, R14")
+	w("\tMOVW\tR16, R15")
+	w("fhmposscale:")
+	ldrQ(1, 14, 0)
+	fmul8hLane(1, 1, 0, 0)
+	strQ(1, 14, 0)
+	w("\tADD\t$16, R14, R14")
+	w("\tSUBW\t$1, R15, R15")
+	w("\tCBNZW\tR15, fhmposscale")
+	w("\tFMOVS\tF29, F31")
+	f.strS(31, 10, 4)
+	w("\tFMOVS\t$1.0, F0") // vs = 1
+	w("\tB\tfhmposacc")
+	w("fhmposkeep:")
+	// vs = exp(max(s - M, -200))
+	f.fsubS(0, 0, 31)
+	fmaxS(0, 0, 7)
+	f.dupS0(0, 0)
+	e.exp(0, 0)
+	w("fhmposacc:")
+	// S += vs; VKQ16 += f16(vs) * V_i
+	f.ldrS(1, 10, 0)
+	faddS(1, 1, 0)
+	f.strS(1, 10, 0)
+	fcvtHS(0, 0)
+	w("\tMOVD\tR19, R14")
+	w("\tMOVD\tR25, R13")
+	w("\tMOVW\tR16, R15")
+	w("fhmposmad:")
+	ldrQ(1, 13, 0)
+	ldrQ(2, 14, 0)
+	fmla8hLane(2, 1, 0, 0)
+	strQ(2, 14, 0)
+	w("\tADD\t$16, R13, R13")
+	w("\tADD\t$16, R14, R14")
+	w("\tSUBW\t$1, R15, R15")
+	w("\tCBNZW\tR15, fhmposmad")
+	w("fhmposnext:")
+	w("\tADD\t$4, R24, R24")
+	w("\tADD\tR7, R25, R25")
+	w("\tSUBW\t$1, R26, R26")
+	w("\tCBNZW\tR26, fhmpos")
 	w("fhmadvance:")
 	w("\tMADD\tR5, R4, R12, R4")
 	w("\tMADD\tR7, R6, R12, R6")
