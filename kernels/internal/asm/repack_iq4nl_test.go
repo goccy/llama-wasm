@@ -23,13 +23,16 @@ func TestIQ4NL8x8KernelShape(t *testing.T) {
 		}
 	}
 	x := x64GemvIQ4NL8x8Kernel("FnGvavx2", NewConstPool("t_"), true)
-	for _, want := range []string{"groupi:", "VPSHUFB\tY5, Y12, Y5", "VPSHUFB\tY6, Y12, Y6", "VPSLLD\t$7, X10, X10", "VPSUBD\tX14, X10, X10"} {
+	if strings.Contains(x, "VPSUBD") {
+		t.Errorf("x64 iq4_nl gemv folds a quant offset: the signed table has none")
+	}
+	for _, want := range []string{"groupi:", "VPSHUFB\tY5, Y12, Y5", "VPSHUFB\tY6, Y12, Y6", "VPSIGNB\tY5, Y8, Y10", "VPSIGNB\tY5, Y5, Y5", "VPMADDUBSW\tY10, Y5, Y10"} {
 		if !strings.Contains(x, want) {
 			t.Errorf("x64 iq4_nl gemv missing %q", want)
 		}
 	}
 	xm := x64GemmIQ4NL8x8Kernel("FnGmavx2", NewConstPool("t_"), true)
-	for _, want := range []string{"rowsi:", "VPSHUFB\tY9, Y11, Y9", "VPSLLD\t$7, Y8, Y8", "VPSUBD\tY13, Y8, Y8"} {
+	for _, want := range []string{"rowsi:", "VPSHUFB\tY9, Y11, Y9", "VPSIGNB\tY9, Y9, Y11", "VPSIGNB\tY9, Y12, Y13", "VPMADDUBSW\tY13, Y11, Y13", "VPXOR\tY8, Y8, Y8"} {
 		if !strings.Contains(xm, want) {
 			t.Errorf("x64 iq4_nl gemm missing %q", want)
 		}
@@ -39,8 +42,8 @@ func TestIQ4NL8x8KernelShape(t *testing.T) {
 		t.Errorf("q5x8 const blob: kvalues table")
 	}
 	xc := x64Q5Consts()
-	if len(xc) != 320 || xc[256] != 0 || xc[256+15] != 240 || xc[256+16] != 0 || xc[288] != 0x88 {
-		t.Errorf("x64 q5 const blob: kvalues + 127 table")
+	if len(xc) != 320 || int8(xc[256]) != -127 || int8(xc[256+15]) != 113 || int8(xc[256+16]) != -127 || xc[288] != 0x88 {
+		t.Errorf("x64 q5 const blob: signed kvalues table")
 	}
 }
 
