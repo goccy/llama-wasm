@@ -105,6 +105,54 @@ func packQ8_0x4(rows [4][]byte, nb int) []byte {
 	return out
 }
 
+// runX8Exact pins the GEMM tile to the GEMV path bit for bit: ggml routes
+// a row either through the 4-row GEMM or through GEMV depending on the
+// batch shape, so the two must agree exactly or batched and sequential
+// decodes diverge.
+func runX8Exact(t *testing.T, name string, gemv, gemm q5Kernel, n, nc int, seed uint32,
+	gen func(*lcg, int) ([]byte, []float64), repack func([8][]byte, int) []byte) {
+	t.Helper()
+	nb := n / 32
+	s := lcg(seed)
+	var vx []byte
+	for g := 0; g < nc/8; g++ {
+		var eight [8][]byte
+		for j := 0; j < 8; j++ {
+			x, _ := gen(&s, nb)
+			eight[j] = x
+		}
+		vx = append(vx, repack(eight, nb)...)
+	}
+	var four [4][]byte
+	for r := 0; r < 4; r++ {
+		four[r], _ = genQ8Row(&s, nb)
+	}
+	vy := packQ8_0x4(four, nb)
+	bs := nc + 8
+	sOff, xOff := 256, 256+4*bs*4+64
+	yOff := xOff + len(vx) + 64
+	mem := make([]byte, yOff+len(vy)+256)
+	copy(mem[xOff:], vx)
+	copy(mem[yOff:], vy)
+	memSize := uint64(len(mem))
+	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	gemm(m, int32(n), int64(sOff), int64(bs), int64(xOff), int64(yOff), 4, int32(nc))
+	for r := 0; r < 4; r++ {
+		vmem := make([]byte, yOff+len(four[r])+256)
+		copy(vmem[xOff:], vx)
+		copy(vmem[yOff:], four[r])
+		vsize := uint64(len(vmem))
+		vm := &mockModule{memSizePtr: &vsize, mem: unsafe.Pointer(&vmem[0])}
+		gemv(vm, int32(n), int64(sOff), int64(nc), int64(xOff), int64(yOff), 1, int32(nc))
+		for c := 0; c < nc; c++ {
+			g, v := get32(mem, sOff+4*(r*bs+c)), get32(vmem, sOff+4*c)
+			if g != v {
+				t.Fatalf("%s n=%d nc=%d [%d][%d]: gemm %v vs gemv %v: the two paths must be bit-identical", name, n, nc, r, c, g, v)
+			}
+		}
+	}
+}
+
 func dotRows(w, a []float64) (float64, float64) {
 	var sum, mag float64
 	for i := range w {
@@ -253,6 +301,14 @@ func TestGemmQ5(t *testing.T) {
 		}
 	}
 }
+
+func TestExactQ5(t *testing.T) {
+	for _, n := range []int{32, 256, 896} {
+		for _, nc := range []int{8, 24} {
+			runX8Exact(t, "q5_0", GemvKernel, GemmKernel, n, nc, uint32(n+nc), genQ5Row, repackQ5_0x8)
+		}
+	}
+}
 `
 
 func TestA64Q5_0_8x8KernelGate(t *testing.T) {
@@ -262,7 +318,7 @@ func TestA64Q5_0_8x8KernelGate(t *testing.T) {
 		wrap("arm64", "GemmKernel", a64GemmQ5Frame, argBytes, "i8mm", a64GemmQ5_0_8x8Kernel("GemmKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
 	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+q5x8RunSrc+q5x8Decls, q5x8RunTest)
-	runArm64Gate(t, dir, ".", "TestGem[vm]Q5", asm)
+	runArm64Gate(t, dir, ".", "TestGem[vm]Q5|TestExactQ5", asm)
 }
 
 func TestX64Q5_0_8x8KernelShape(t *testing.T) {
@@ -287,5 +343,5 @@ func TestX64Q5_0_8x8KernelGate(t *testing.T) {
 		wrap("amd64", "GemmKernel", x64GemmQ5Frame, argBytes, "avx2", x64GemmQ5_0_8x8Kernel("GemmKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
 	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+q5x8RunSrc+q5x8Decls, q5x8RunTest)
-	runAmd64Gate(t, dir, ".", "TestGem[vm]Q5", asm)
+	runAmd64Gate(t, dir, ".", "TestGem[vm]Q5|TestExactQ5", asm)
 }

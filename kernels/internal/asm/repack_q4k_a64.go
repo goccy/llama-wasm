@@ -34,6 +34,30 @@ const (
 	q4Kx8QsOff      = 128
 )
 
+// kx8Layout describes a K-quant block repacked eight rows wide with the
+// 6-bit scales/mins packing shared by q4_K and q5_K: block_q4_Kx8
+// (1152) = d[8] | dmin[8] | scales[96] | qs[1024]; block_q5_Kx8 (1408)
+// = d[8] | dmin[8] | scales[96] | qh[256] | qs[1024], where qh group k
+// (64 bytes, the eight rows' qh bytes [8k, 8k+8)) carries bit 2c (low
+// nibbles) and bit 2c+1 (high nibbles) of chunk c's quants.
+type kx8Layout struct {
+	name       string
+	lbl        string // GEMV label prefix
+	mlbl       string // GEMM label prefix
+	tlbl       string // GEMM tile-loop label prefix (AVX2)
+	scratch    string // GEMM frame scratch symbol
+	blockBytes int
+	scalesOff  int
+	qsOff      int
+	qhOff      int  // fifth bits (q5_K)
+	fifth      bool // q5_K: quants carry a fifth bit from qh
+}
+
+var (
+	q4Kx8Layout = kx8Layout{name: "q4_K", lbl: "gk", mlbl: "gm", tlbl: "gt", scratch: "q4kscratch", blockBytes: q4Kx8BlockBytes, scalesOff: q4Kx8ScalesOff, qsOff: q4Kx8QsOff}
+	q5Kx8Layout = kx8Layout{name: "q5_K", lbl: "gk5", mlbl: "gm5", tlbl: "gt5", scratch: "q5kscratch", blockBytes: 1408, scalesOff: 32, qsOff: 384, qhOff: 128, fifth: true}
+)
+
 // q4Kx8ScalesMins decodes the 12 packed bytes at off(R<xr>) of one
 // sub-block of a block_q4_Kx8 into the 8 mins (v<minsReg>.8b) and the 8
 // scales (v<scReg>.8b) of its eight columns, through R13, R14, R15,
@@ -92,6 +116,17 @@ func (e *a64Q) fmulLane(d, n, m, idx int) {
 // (broadcast); v8..v11 SDOT accumulators; v14/v15/v24..v27 scratch;
 // v31 = 0x0f.
 func a64GemvQ4K8x8Kernel(sym string, wide bool) string {
+	return a64GemvKx8Kernel(sym, wide, q4Kx8Layout)
+}
+
+// a64GemvQ5K8x8Kernel emits the q5_K GEMV: the q4_K body with the fifth
+// bit of every quant merged from qh (bit 2c / 2c+1 of qh group k for
+// chunk c), as in llama.cpp's arm64 gemv_q5_K_8x8_q8_K.
+func a64GemvQ5K8x8Kernel(sym string, wide bool) string {
+	return a64GemvKx8Kernel(sym, wide, q5Kx8Layout)
+}
+
+func a64GemvKx8Kernel(sym string, wide bool, L kx8Layout) string {
 	var sb strings.Builder
 	e := newA64Q(&sb)
 	w := e.w
@@ -108,68 +143,60 @@ func a64GemvQ4K8x8Kernel(sym string, wide bool) string {
 		w("\t%s\t%s+%d(FP), R%d", mv, name, argOff[name], reg)
 	}
 
-	w("// %s: q4_K 8x8 repack GEMV, SDOT over broadcast activation quads.", sym)
+	w("// %s: %s 8x8 repack GEMV, SDOT over broadcast activation quads.", sym, L.name)
 	w("\tMOVW\tl0+8(FP), R1")
 	w("\tLSRW\t$8, R1, R1") // nb
 	arg("l6", 7)
 	w("\tLSRW\t$3, R7, R7") // column groups
-	w("\tCBZW\tR7, gkdone")
+	w("\tCBZW\tR7, %sdone", L.lbl)
 	arg("l1", 2)
 	w("\tLSL\t$5, R7, R26") // nc*4 bytes of output
 	w("\tADD\tR2, R26, R26")
 	w("\tCMP\tR26, R21")
-	w("\tBLO\tgkoob")
+	w("\tBLO\t%soob", L.lbl)
 	arg("l3", 3)
-	w("\tMOVD\t$%d, R6", q4Kx8BlockBytes)
+	w("\tMOVD\t$%d, R6", L.blockBytes)
 	w("\tMUL\tR1, R6, R6") // group stride = nb * 1152
 	w("\tMUL\tR7, R6, R26")
 	w("\tADD\tR3, R26, R26")
 	w("\tCMP\tR26, R21")
-	w("\tBLO\tgkoob")
+	w("\tBLO\t%soob", L.lbl)
 	arg("l4", 4)
 	w("\tMOVD\t$%d, R26", q8_KBlockBytes)
 	w("\tMUL\tR1, R26, R26")
 	w("\tADD\tR4, R26, R26")
 	w("\tCMP\tR26, R21")
-	w("\tBLO\tgkoob")
+	w("\tBLO\t%soob", L.lbl)
 	w("\tADD\tR20, R2, R2")
 	w("\tADD\tR20, R3, R3")
 	w("\tADD\tR20, R4, R4")
 	e.movi16(31, 15)
 
-	w("gkgroup:")
+	w("%sgroup:", L.lbl)
 	e.movi4s0(0)
 	e.movi4s0(1)
 	w("\tMOVD\tR3, R9")
 	w("\tMOVD\tR4, R10")
 	w("\tMOVW\tR1, R8")
-	w("\tCBZW\tR8, gkstore")
-	w("gkblk:")
-	// per-block scale vectors: d*yd (v2, v3), dmin*yd (v28, v29)
-	e.ldurS(24, 10, 0)
-	e.ldurD(25, 9, 0)
-	e.fcvtl(2, 25)
-	e.fmulLane(2, 2, 24, 0)
-	e.ldurD(25, 9, 8)
-	e.fcvtl(3, 25)
-	e.fmulLane(3, 3, 24, 0)
-	e.ldurD(25, 9, 16)
-	e.fcvtl(28, 25)
-	e.fmulLane(28, 28, 24, 0)
-	e.ldurD(25, 9, 24)
-	e.fcvtl(29, 25)
-	e.fmulLane(29, 29, 24, 0)
+	w("\tCBZW\tR8, %sstore", L.lbl)
+	w("%sblk:", L.lbl)
+	// the block's integer accumulators: sumi (v2 columns 0-3, v3 4-7)
+	// and the mins bias (v30, v7); like the GEMM tile (and llama.cpp's
+	// gemv) the whole super-block accumulates in i32 and converts once,
+	// so the GEMV and GEMM paths agree bit for bit
+	e.movi4s0(2)
+	e.movi4s0(3)
+	e.movi4s0(30)
+	e.movi4s0(7)
 	// activation sub-block sums: pairs of the 16 bsums
 	w("\tADD\t$256, R10, R11")
 	e.ldurQ(24, 11, 4)
 	e.ldurQ(25, 11, 20)
 	e.addp8h(6, 24, 25)
-	e.movi4s0(30)
-	e.movi4s0(7)
 	for chunk := 0; chunk < 4; chunk++ {
 		// scales and mins of the chunk's two sub-blocks (low / high nibbles)
-		e.q4Kx8ScalesMins(9, q4Kx8ScalesOff+chunk*24, 4, 12)
-		e.q4Kx8ScalesMins(9, q4Kx8ScalesOff+chunk*24+12, 5, 13)
+		e.q4Kx8ScalesMins(9, L.scalesOff+chunk*24, 4, 12)
+		e.q4Kx8ScalesMins(9, L.scalesOff+chunk*24+12, 5, 13)
 		e.ushll8h(4, 4)
 		e.ushll8h(5, 5)
 		e.ushll8h(12, 12)
@@ -179,10 +206,17 @@ func a64GemvQ4K8x8Kernel(sym string, wide bool) string {
 			e.ldurD(16+k, 10, 4+chunk*64+8*k)
 			e.dup2d(16+k, 16+k, 0)
 		}
-		w("\tADD\t$%d, R9, R12", q4Kx8QsOff+chunk*256)
+		w("\tADD\t$%d, R9, R12", L.qsOff+chunk*256)
+		if L.fifth {
+			w("\tADD\t$%d, R9, R13", L.qhOff) // (the scale decoder clobbered R13)
+		}
 		for quad := 0; quad < 2; quad++ {
 			for i := 8; i < 12; i++ {
 				e.movi4s0(i)
+			}
+			if L.fifth {
+				e.movi16(14, 1) // bit masks for the fifth bits (v14/v15 are
+				e.movi16(15, 2) // fold scratch after the SDOTs)
 			}
 			for cp := 2 * quad; cp < 2*quad+2; cp++ {
 				lo, hi := 8+cp-2*quad, 10+cp-2*quad
@@ -190,22 +224,32 @@ func a64GemvQ4K8x8Kernel(sym string, wide bool) string {
 					e.ldurQ(24, 12, 16*cp+64*k)
 					e.and16(25, 24, 31)
 					e.ushr16(26, 24, 4)
+					if L.fifth {
+						// fifth bits: qh group k, bit 2c -> low nibbles, bit 2c+1 -> high
+						e.ldurQ(27, 13, 16*cp+64*k)
+						if chunk > 0 {
+							e.ushr16(27, 27, 2*chunk)
+						}
+						e.and16(24, 27, 14)
+						e.shl16(24, 24, 4)
+						e.orr16(25, 25, 24)
+						e.and16(24, 27, 15)
+						e.shl16(24, 24, 3)
+						e.orr16(26, 26, 24)
+					}
 					e.sdot(lo, 25, 16+k)
 					e.sdot(hi, 26, 20+k)
 				}
 			}
-			acc := quad // v0 or v1
-			scale := 2 + quad
-			// low nibbles: columns 4quad..4quad+3 of sub-block 2chunk
+			acc := 2 + quad // i32 sumi of columns 4quad..4quad+3
+			// low nibbles: sub-block 2chunk
 			e.addp4s(14, 8, 9)
 			if quad == 0 {
 				e.ushll4s(15, 12)
 			} else {
 				e.ushll2_4s(15, 12)
 			}
-			e.mul4s(14, 14, 15)
-			e.scvtf4s(14, 14)
-			e.fmla4s(acc, 14, scale)
+			e.mla4s(acc, 14, 15)
 			// high nibbles: sub-block 2chunk+1
 			e.addp4s(14, 10, 11)
 			if quad == 0 {
@@ -213,9 +257,7 @@ func a64GemvQ4K8x8Kernel(sym string, wide bool) string {
 			} else {
 				e.ushll2_4s(15, 13)
 			}
-			e.mul4s(14, 14, 15)
-			e.scvtf4s(14, 14)
-			e.fmla4s(acc, 14, scale)
+			e.mla4s(acc, 14, 15)
 		}
 		// bias: sum(bsums) * mins per column, both sub-blocks of the chunk
 		e.smlalLaneH(30, 4, 6, 2*chunk)
@@ -223,24 +265,42 @@ func a64GemvQ4K8x8Kernel(sym string, wide bool) string {
 		e.smlal2LaneH(7, 4, 6, 2*chunk)
 		e.smlal2LaneH(7, 5, 6, 2*chunk+1)
 	}
+	// fold: acc += sumi * d*yd - bias * dmin*yd (the GEMM tile's order)
+	e.ldurS(24, 10, 0)
+	e.ldurD(25, 9, 0)
+	e.fcvtl(28, 25)
+	e.fmulLane(28, 28, 24, 0) // d*yd, columns 0-3
+	e.ldurD(25, 9, 8)
+	e.fcvtl(29, 25)
+	e.fmulLane(29, 29, 24, 0) // columns 4-7
+	e.scvtf4s(2, 2)
+	e.scvtf4s(3, 3)
+	e.fmla4s(0, 2, 28)
+	e.fmla4s(1, 3, 29)
+	e.ldurD(25, 9, 16)
+	e.fcvtl(28, 25)
+	e.fmulLane(28, 28, 24, 0) // dmin*yd, columns 0-3
+	e.ldurD(25, 9, 24)
+	e.fcvtl(29, 25)
+	e.fmulLane(29, 29, 24, 0)
 	e.scvtf4s(30, 30)
 	e.scvtf4s(7, 7)
 	e.fmls4s(0, 30, 28)
 	e.fmls4s(1, 7, 29)
-	w("\tADD\t$%d, R9, R9", q4Kx8BlockBytes)
+	w("\tADD\t$%d, R9, R9", L.blockBytes)
 	w("\tADD\t$%d, R10, R10", q8_KBlockBytes)
 	w("\tSUBW\t$1, R8, R8")
-	w("\tCBNZW\tR8, gkblk")
-	w("gkstore:")
+	w("\tCBNZW\tR8, %sblk", L.lbl)
+	w("%sstore:", L.lbl)
 	e.word(0x3C800000|uint32(0)<<12|uint32(2)<<5|uint32(0), "stur q0, [x2, #0]")
 	e.word(0x3C800000|uint32(16)<<12|uint32(2)<<5|uint32(1), "stur q1, [x2, #16]")
 	w("\tADD\t$32, R2, R2")
 	w("\tADD\tR3, R6, R3")
 	w("\tSUBW\t$1, R7, R7")
-	w("\tCBNZW\tR7, gkgroup")
-	w("gkdone:")
+	w("\tCBNZW\tR7, %sgroup", L.lbl)
+	w("%sdone:", L.lbl)
 	w("\tRET")
-	w("gkoob:")
+	w("%soob:", L.lbl)
 	w("\tB\tovr_oob")
 	return sb.String()
 }
@@ -310,6 +370,16 @@ func (e *a64Q) sturQ(rt, rn, imm int) {
 // nibble temps; v18/v19 activation quads; v20/v21 block scales;
 // v24..v29 scale widening; v31 = 0x0f.
 func a64GemmQ4K8x8Kernel(sym string, wide bool) string {
+	return a64GemmKx8Kernel(sym, wide, q4Kx8Layout)
+}
+
+// a64GemmQ5K8x8Kernel emits the q5_K GEMM: the q4_K tile with the fifth
+// bits merged from qh (see a64GemvQ5K8x8Kernel).
+func a64GemmQ5K8x8Kernel(sym string, wide bool) string {
+	return a64GemmKx8Kernel(sym, wide, q5Kx8Layout)
+}
+
+func a64GemmKx8Kernel(sym string, wide bool, L kx8Layout) string {
 	var sb strings.Builder
 	e := newA64Q(&sb)
 	w := e.w
@@ -326,15 +396,15 @@ func a64GemmQ4K8x8Kernel(sym string, wide bool) string {
 		w("\t%s\t%s+%d(FP), R%d", mv, name, argOff[name], reg)
 	}
 
-	w("// %s: q4_K 8x8 repack GEMM, SMMLA 2x2 tiles over the interleaved layouts.", sym)
+	w("// %s: %s 8x8 repack GEMM, SMMLA 2x2 tiles over the interleaved layouts.", sym, L.name)
 	w("\tMOVW\tl0+8(FP), R1")
 	w("\tLSRW\t$8, R1, R1") // nb
 	arg("l6", 7)
 	w("\tLSRW\t$3, R7, R7") // column groups
 	arg("l5", 8)
 	w("\tLSRW\t$2, R8, R8") // row groups
-	w("\tCBZW\tR7, gmdone")
-	w("\tCBZW\tR8, gmdone")
+	w("\tCBZW\tR7, %sdone", L.mlbl)
+	w("\tCBZW\tR8, %sdone", L.mlbl)
 	arg("l1", 2)
 	arg("l2", 5)
 	w("\tLSL\t$2, R5, R5") // bs floats -> bytes
@@ -345,33 +415,33 @@ func a64GemmQ4K8x8Kernel(sym string, wide bool) string {
 	w("\tADD\tR2, R26, R26")
 	w("\tADD\tR7<<5, R26, R26")
 	w("\tCMP\tR26, R21")
-	w("\tBLO\tgmoob")
+	w("\tBLO\t%soob", L.mlbl)
 	arg("l3", 3)
-	w("\tMOVD\t$%d, R6", q4Kx8BlockBytes)
+	w("\tMOVD\t$%d, R6", L.blockBytes)
 	w("\tMUL\tR1, R6, R6")
 	w("\tMUL\tR7, R6, R26")
 	w("\tADD\tR3, R26, R26")
 	w("\tCMP\tR26, R21")
-	w("\tBLO\tgmoob")
+	w("\tBLO\t%soob", L.mlbl)
 	arg("l4", 4)
 	w("\tMOVD\t$%d, R26", q8Kx4BlockBytes)
 	w("\tMUL\tR1, R26, R26")
 	w("\tMUL\tR8, R26, R26")
 	w("\tADD\tR4, R26, R26")
 	w("\tCMP\tR26, R21")
-	w("\tBLO\tgmoob")
+	w("\tBLO\t%soob", L.mlbl)
 	w("\tADD\tR20, R2, R2")
 	w("\tADD\tR20, R3, R3")
 	w("\tADD\tR20, R4, R4")
-	w("\tMOVD\t$q4kscratch-%d(SP), R23", a64GemmQ4KScratch)
+	w("\tMOVD\t$%s-%d(SP), R23", L.scratch, a64GemmQ4KScratch)
 	e.movi16(31, 15)
 
 	// ---- row groups (4 activation rows each).
-	w("gmrows:")
+	w("%srows:", L.mlbl)
 	w("\tMOVD\tR3, R0")  // weight groups restart per row group
 	w("\tMOVD\tR2, R24") // output for column group 0 of this row group
 	w("\tMOVW\tR7, R25")
-	w("gmcols:")
+	w("%scols:", L.mlbl)
 	// zero the f32 tile accumulators in scratch
 	e.movi4s0(8)
 	for i := 0; i < 8; i++ {
@@ -380,17 +450,22 @@ func a64GemmQ4K8x8Kernel(sym string, wide bool) string {
 	w("\tMOVD\tR0, R9")
 	w("\tMOVD\tR4, R10")
 	w("\tMOVW\tR1, R11")
-	w("\tCBZW\tR11, gmstore")
-	w("gmblk:")
+	w("\tCBZW\tR11, %sstore", L.mlbl)
+	w("%sblk:", L.mlbl)
 	// A: decode the eight sub-blocks' scales and mins into scratch.
 	for k := 0; k < 8; k++ {
-		e.q4Kx8ScalesMins(9, q4Kx8ScalesOff+12*k, 16, 17)
+		e.q4Kx8ScalesMins(9, L.scalesOff+12*k, 16, 17)
 		e.sturD(17, 23, 16*k)
 		e.sturD(16, 23, 16*k+8)
 	}
 	// B: the SMMLA tile.
 	for i := 0; i < 8; i++ {
 		e.movi4s0(i)
+	}
+	if L.fifth {
+		w("\tADD\t$%d, R9, R13", L.qhOff) // qh base (R13 was the scale decoder's scratch)
+		e.movi16(22, 1)                   // fifth-bit masks: v22/v23 are the bias
+		e.movi16(23, 2)                   // accumulators of step C, so rebuilt per block
 	}
 	for chunk := 0; chunk < 4; chunk++ {
 		// scales of sub-blocks 2chunk (low nibbles) and 2chunk+1 (high) as i32 lanes:
@@ -403,7 +478,7 @@ func a64GemmQ4K8x8Kernel(sym string, wide bool) string {
 		e.ushll8h(25, 25)
 		e.ushll4s(28, 25)
 		e.ushll2_4s(29, 25)
-		w("\tADD\t$%d, R9, R12", q4Kx8QsOff+chunk*256)
+		w("\tADD\t$%d, R9, R12", L.qsOff+chunk*256)
 		w("\tADD\t$%d, R10, R14", q8Kx4QsOff+chunk*256)
 		for cp := 0; cp < 4; cp++ {
 			// block scales [s(2cp), s(2cp), s(2cp+1), s(2cp+1)] for low (v20) and high (v21)
@@ -427,6 +502,18 @@ func a64GemmQ4K8x8Kernel(sym string, wide bool) string {
 			for k := 0; k < 4; k++ {
 				e.and16(16, 12+k, 31)
 				e.ushr16(17, 12+k, 4)
+				if L.fifth {
+					e.ldurQ(24, 13, 16*cp+64*k)
+					if chunk > 0 {
+						e.ushr16(24, 24, 2*chunk)
+					}
+					e.and16(25, 24, 22)
+					e.shl16(25, 25, 4)
+					e.orr16(16, 16, 25)
+					e.and16(25, 24, 23)
+					e.shl16(25, 25, 3)
+					e.orr16(17, 17, 25)
+				}
 				e.ldurQ(18, 14, 32*k)     // rows 0/1, quad k (low nibbles)
 				e.ldurQ(19, 14, 32*k+16)  // rows 2/3
 				e.smmla(8, 16, 18)        // c(2cp..2cp+1) x r0/r1, low
@@ -501,11 +588,11 @@ func a64GemmQ4K8x8Kernel(sym string, wide bool) string {
 		}
 	}
 	e.movi16(31, 15)
-	w("\tADD\t$%d, R9, R9", q4Kx8BlockBytes)
+	w("\tADD\t$%d, R9, R9", L.blockBytes)
 	w("\tADD\t$%d, R10, R10", q8Kx4BlockBytes)
 	w("\tSUBW\t$1, R11, R11")
-	w("\tCBNZW\tR11, gmblk")
-	w("gmstore:")
+	w("\tCBNZW\tR11, %sblk", L.mlbl)
+	w("%sstore:", L.mlbl)
 	// s[(row) * bs + col]: rows of this group at R24 + r*R5.
 	w("\tMOVD\tR24, R12")
 	for r := 0; r < 4; r++ {
@@ -520,7 +607,7 @@ func a64GemmQ4K8x8Kernel(sym string, wide bool) string {
 	w("\tADD\t$32, R24, R24")
 	w("\tADD\tR0, R6, R0")
 	w("\tSUBW\t$1, R25, R25")
-	w("\tCBNZW\tR25, gmcols")
+	w("\tCBNZW\tR25, %scols", L.mlbl)
 	// next row group: activations advance by nb blocks, outputs by 4 rows
 	w("\tMOVD\t$%d, R26", q8Kx4BlockBytes)
 	w("\tMUL\tR1, R26, R26")
@@ -528,10 +615,10 @@ func a64GemmQ4K8x8Kernel(sym string, wide bool) string {
 	w("\tLSL\t$2, R5, R26")
 	w("\tADD\tR2, R26, R2")
 	w("\tSUBW\t$1, R8, R8")
-	w("\tCBNZW\tR8, gmrows")
-	w("gmdone:")
+	w("\tCBNZW\tR8, %srows", L.mlbl)
+	w("%sdone:", L.mlbl)
 	w("\tRET")
-	w("gmoob:")
+	w("%soob:", L.mlbl)
 	w("\tB\tovr_oob")
 	return sb.String()
 }

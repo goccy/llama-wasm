@@ -9,8 +9,12 @@ import (
 // dbg_quantize_mat_q8_0_4x8): four f32 rows of k elements into k/32
 // block_q8_0x4 blocks, the activation layout of the 8-wide q8_0 repack
 // GEMMs (Q5_0 8x8 here). ggml has only the scalar body: per row and
-// block d = amax/127, id = 1/d, q = roundf(x * id) (ties away from
-// zero: FCVTAS), quants of eight consecutive elements of row m at
+// block d = amax/127, id = 1/d, q = round-to-nearest-even(x * id)
+// (FCVTNS: the rounding of quantize_row_q8_0 and of every native SIMD
+// quantizer; ggml's scalar body rounds ties away with roundf, and the
+// llama-wasm patch aligns it to nearest-even so the GEMM path, fed by
+// this function, quantizes exactly like the GEMV path, fed by
+// quantize_row_q8_0), quants of eight consecutive elements of row m at
 // qs[32k + 8m], d[m] as f16.
 //
 // C signature: void f(const float *x, void *vy, int64_t k); k is a
@@ -38,7 +42,7 @@ func a64QuantizeMatQ8_0_4x8Kernel(sym string, wide bool) string {
 		word(0x4E20F400|lane3(d, n, m), fmt.Sprintf("fmax v%d.4s, v%d.4s, v%d.4s", d, n, m))
 	}
 	fmaxvS := func(d, n int) { word(0x6E30F800|uint32(n)<<5|uint32(d), fmt.Sprintf("fmaxv s%d, v%d.4s", d, n)) }
-	fcvtas4s := func(d, n int) { word(0x4E21C800|uint32(n)<<5|uint32(d), fmt.Sprintf("fcvtas v%d.4s, v%d.4s", d, n)) }
+	fcvtns4s := func(d, n int) { word(0x4E21A800|uint32(n)<<5|uint32(d), fmt.Sprintf("fcvtns v%d.4s, v%d.4s", d, n)) }
 	sqxtn4h := func(d, n int) { word(0x0E614800|uint32(n)<<5|uint32(d), fmt.Sprintf("sqxtn v%d.4h, v%d.4s", d, n)) }
 	sqxtn2_8h := func(d, n int) { word(0x4E614800|uint32(n)<<5|uint32(d), fmt.Sprintf("sqxtn2 v%d.8h, v%d.4s", d, n)) }
 	sqxtn8b := func(d, n int) { word(0x0E214800|uint32(n)<<5|uint32(d), fmt.Sprintf("sqxtn v%d.8b, v%d.8h", d, n)) }
@@ -110,8 +114,8 @@ func a64QuantizeMatQ8_0_4x8Kernel(sym string, wide bool) string {
 	for k := 0; k < 4; k++ {
 		e.fmul4s(10, 2*k, 9)
 		e.fmul4s(11, 2*k+1, 9)
-		fcvtas4s(10, 10)
-		fcvtas4s(11, 11)
+		fcvtns4s(10, 10)
+		fcvtns4s(11, 11)
 		sqxtn4h(12, 10)
 		sqxtn2_8h(12, 11)
 		sqxtn8b(13, 12)

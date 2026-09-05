@@ -22,7 +22,13 @@ import (
 // 96: VPSHUFB index, low-nibble runs; 128: high-nibble runs; 160: 16 x
 // i16 1; 192: 32 x u8 1; 224: VPERMPS index [0 1 4 5 2 3 6 7].
 func x64Q5Consts() []byte {
-	c := make([]byte, 256)
+	c := make([]byte, 320)
+	for i := 0; i < 32; i++ {
+		c[288+i] = 0x88 // q4_0x8 nibble xor
+	}
+	for i := 0; i < 32; i++ {
+		c[256+i] = byte(kvaluesIQ4NL[i%16]) // iq4_nl table, signed
+	}
 	for i := 0; i < 32; i++ {
 		c[i] = 0x0f
 		c[32+i] = 0x10
@@ -48,6 +54,8 @@ const (
 	x64q5IdxHi  = 128
 	x64q5Ones16 = 160
 	x64q5Ones8  = 192
+	x64q5LUT    = 256
+	x64q5Xor    = 288
 	x64q5Perm   = 224
 	// GEMM frame: 0 the rows' 16 x block sums in hadd-order lanes (row 0
 	// at 0, 1 at 4, 2 at 16, 3 at 20) | 32 f32 tiles (4 x 32) | 160 vx |
@@ -60,11 +68,32 @@ const (
 // each, through Y<raw> (also the bit scratch) and Y<qh>. c is the
 // constant blob symbol.
 func x64Q5Unpack(w func(string, ...any), c string, m, raw, lo, hi, qh int) {
-	w("\tVMOVDQU\t%d(R9), Y%d", q5_0x8QsOff+32*m, raw)
+	x64X8Unpack(w, c, m, raw, lo, hi, qh, q5_0x8L)
+}
+
+// x64X8Unpack is x64Q5Unpack for any x8Layout (no fifth bits for q4_0).
+func x64X8Unpack(w func(string, ...any), c string, m, raw, lo, hi, qh int, L x8Layout) {
+	w("\tVMOVDQU\t%d(R9), Y%d", L.qsOff+32*m, raw)
+	if L.xor != 0 {
+		w("\tVPXOR\t%s+%d(SB), Y%d, Y%d", c, x64q5Xor, raw, raw) // undo the repack's nibble ^ 8
+	}
 	w("\tVPAND\t%s+%d(SB), Y%d, Y%d", c, x64q5Low, raw, lo)
 	w("\tVPSRLW\t$4, Y%d, Y%d", raw, hi)
 	w("\tVPAND\t%s+%d(SB), Y%d, Y%d", c, x64q5Low, hi, hi)
-	w("\tVPBROADCASTQ\t%d(R9), Y%d", q5_0x8QhOff+8*m, qh)
+	if L.lut {
+		// Signed kvalues through the (free) qh register. The multiply
+		// then uses the abs/sign idiom: VPMADDUBSW saturates its i16 pair
+		// sums, and an unsigned table (kvalues + 127, up to 240) against
+		// s8 activations overflows them; |kvalues| <= 127 keeps every pair
+		// sum within range.
+		w("\tVMOVDQU\t%s+%d(SB), Y%d", c, x64q5LUT, qh)
+		w("\tVPSHUFB\tY%d, Y%d, Y%d", lo, qh, lo)
+		w("\tVPSHUFB\tY%d, Y%d, Y%d", hi, qh, hi)
+	}
+	if !L.fifth {
+		return
+	}
+	w("\tVPBROADCASTQ\t%d(R9), Y%d", L.qhOff+8*m, qh)
 	for _, h := range []struct{ idx, dst int }{{x64q5IdxLo, lo}, {x64q5IdxHi, hi}} {
 		w("\tVPSHUFB\t%s+%d(SB), Y%d, Y%d", c, h.idx, qh, raw)
 		w("\tVPAND\t%s+%d(SB), Y%d, Y%d", c, x64q5Bits, raw, raw)
@@ -78,6 +107,10 @@ func x64Q5Unpack(w func(string, ...any), c string, m, raw, lo, hi, qh int) {
 // pointers: CX nb, DI s, R9 vx, R10 vy, R11 column groups, R12 group
 // stride (weights), BX row groups (GEMM) / unused, R13 bs bytes (GEMM).
 func x64Q5Prologue(w func(string, ...any), wide, gemm bool, oob string) {
+	x64X8Prologue(w, wide, gemm, oob, q5_0x8L)
+}
+
+func x64X8Prologue(w func(string, ...any), wide, gemm bool, oob string, L x8Layout) {
 	argOff, _ := repackGemmArgs(wide)
 	movPtr := "MOVL"
 	if wide {
@@ -90,17 +123,17 @@ func x64Q5Prologue(w func(string, ...any), wide, gemm bool, oob string) {
 	w("\t%s\tl1+%d(FP), DI", movPtr, argOff["l1"])
 	w("\t%s\tl3+%d(FP), R9", movPtr, argOff["l3"])
 	w("\t%s\tl4+%d(FP), R10", movPtr, argOff["l4"])
-	w("\tIMUL3Q\t$%d, CX, R12", q5_0x8BlockBytes) // group stride
+	w("\tIMUL3Q\t$%d, CX, R12", L.blockBytes) // group stride
 	if gemm {
 		w("\tMOVL\tl5+%d(FP), BX", argOff["l5"])
 		w("\tSHRL\t$2, BX") // row groups
 		w("\t%s\tl2+%d(FP), R13", movPtr, argOff["l2"])
 		w("\tSHLQ\t$2, R13") // bs bytes
 		w("\tTESTQ\tBX, BX")
-		w("\tJZ\tdone5")
+		w("\tJZ\tdone%s", L.lbl)
 	}
 	w("\tTESTQ\tR11, R11")
-	w("\tJZ\tdone5")
+	w("\tJZ\tdone%s", L.lbl)
 	// s + (nr-1)*bs*4 + nc*4
 	if gemm {
 		w("\tLEAQ\t-1(BX*4), AX")
@@ -142,47 +175,90 @@ func x64Q5Prologue(w func(string, ...any), wide, gemm bool, oob string) {
 // order), Y11 16 x block sum, Y13 u8 ones, Y15 the permute index,
 // Y4..Y10, Y12, Y14 scratch.
 func x64GemvQ5_0_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
+	return x64GemvX8Kernel(sym, pool, wide, q5_0x8L)
+}
+
+// x64GemvQ4_0_8x8Kernel emits the q4_0 8x8 GEMV (q5_0 body, no fifth
+// bits, -8 through the block sum).
+func x64GemvQ4_0_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
+	return x64GemvX8Kernel(sym, pool, wide, q4_0x8L)
+}
+
+// x64GemvIQ4NL8x8Kernel / x64GemmIQ4NL8x8Kernel: the iq4_nl 8x8 bodies (the
+// q4_0 bodies with signed kvalues looked up per nibble and the abs/sign
+// pair dot in place of the unsigned unpack's folded offset).
+func x64GemvIQ4NL8x8Kernel(sym string, pool *ConstPool, wide bool) string {
+	return x64GemvX8Kernel(sym, pool, wide, iq4_nlx8L)
+}
+
+func x64GemmIQ4NL8x8Kernel(sym string, pool *ConstPool, wide bool) string {
+	return x64GemmX8Kernel(sym, pool, wide, iq4_nlx8L)
+}
+
+func x64GemvX8Kernel(sym string, pool *ConstPool, wide bool, L x8Layout) string {
 	var sb strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&sb, format+"\n", args...) }
 	c := "·" + pool.addBlob(x64Q5Consts())
-	w("// %s: q5_0 8x8 repack GEMV (AVX2), VPMADDUBSW over the unpacked runs; -16 folded through the block sum.", sym)
-	x64Q5Prologue(w, wide, false, "oob5")
+	if L.lut {
+		w("// %s: %s 8x8 repack GEMV (AVX2), abs/sign VPMADDUBSW over the signed table lookups.", sym, L.name)
+	} else {
+		w("// %s: %s 8x8 repack GEMV (AVX2), VPMADDUBSW over the unpacked runs; -%d folded through the block sum.", sym, L.name, x8Offset(L))
+	}
+	x64X8Prologue(w, wide, false, "oob"+L.lbl, L)
 	w("\tVMOVDQU\t%s+%d(SB), Y13", c, x64q5Ones8)
 	w("\tVMOVDQU\t%s+%d(SB), Y15", c, x64q5Perm)
-	w("group5:")
+	w("group%s:", L.lbl)
 	w("\tVXORPS\tY2, Y2, Y2")
 	w("\tMOVQ\tR10, DX")
 	w("\tMOVQ\tCX, R8")
 	w("\tTESTQ\tR8, R8")
-	w("\tJZ\tstore5")
-	w("blk5:")
-	// 16 x block sum of the activations in every lane of Y11
-	w("\tVMOVDQU\t2(DX), Y10")
-	w("\tVPMADDUBSW\tY10, Y13, Y10")
-	w("\tVPMADDWD\t%s+%d(SB), Y10, Y10", c, x64q5Ones16)
-	w("\tVEXTRACTI128\t$1, Y10, X11")
-	w("\tVPADDD\tX11, X10, X10")
-	w("\tVPHADDD\tX10, X10, X10")
-	w("\tVPHADDD\tX10, X10, X10")
-	w("\tVPSLLD\t$4, X10, X10")
-	w("\tVPBROADCASTD\tX10, Y11")
+	w("\tJZ\tstore%s", L.lbl)
+	w("blk%s:", L.lbl)
+	if !L.lut {
+		// 2^shift x block sum of the activations in every lane of Y11: the
+		// quant offset the unsigned unpack carries.
+		w("\tVMOVDQU\t2(DX), Y10")
+		w("\tVPMADDUBSW\tY10, Y13, Y10")
+		w("\tVPMADDWD\t%s+%d(SB), Y10, Y10", c, x64q5Ones16)
+		w("\tVEXTRACTI128\t$1, Y10, X11")
+		w("\tVPADDD\tX11, X10, X10")
+		w("\tVPHADDD\tX10, X10, X10")
+		w("\tVPHADDD\tX10, X10, X10")
+		w("\tVPSLLD\t$%d, X10, X10", L.shift)
+		w("\tVPBROADCASTD\tX10, Y11")
+	}
 	w("\tVPXOR\tY0, Y0, Y0")
 	w("\tVPXOR\tY1, Y1, Y1")
 	for m := 0; m < 4; m++ {
-		x64Q5Unpack(w, c, m, 4, 5, 6, 12)
+		x64X8Unpack(w, c, m, 4, 5, 6, 12, L)
 		base := 8 * (m / 2)
 		acc := m % 2
 		w("\tVPBROADCASTQ\t%d(DX), Y8", 2+base)
 		w("\tVPBROADCASTQ\t%d(DX), Y9", 2+base+16)
-		w("\tVPMADDUBSW\tY8, Y5, Y10")
+		if L.lut {
+			// signed table: |w| x sign(y, w)
+			w("\tVPSIGNB\tY5, Y8, Y10")
+			w("\tVPSIGNB\tY5, Y5, Y5")
+			w("\tVPMADDUBSW\tY10, Y5, Y10")
+		} else {
+			w("\tVPMADDUBSW\tY8, Y5, Y10")
+		}
 		w("\tVPMADDWD\t%s+%d(SB), Y10, Y10", c, x64q5Ones16)
 		w("\tVPADDD\tY10, Y%d, Y%d", acc, acc)
-		w("\tVPMADDUBSW\tY9, Y6, Y10")
+		if L.lut {
+			w("\tVPSIGNB\tY6, Y9, Y10")
+			w("\tVPSIGNB\tY6, Y6, Y6")
+			w("\tVPMADDUBSW\tY10, Y6, Y10")
+		} else {
+			w("\tVPMADDUBSW\tY9, Y6, Y10")
+		}
 		w("\tVPMADDWD\t%s+%d(SB), Y10, Y10", c, x64q5Ones16)
 		w("\tVPADDD\tY10, Y%d, Y%d", acc, acc)
 	}
 	w("\tVPHADDD\tY1, Y0, Y0") // [c0 c1 c4 c5 | c2 c3 c6 c7]
-	w("\tVPSUBD\tY11, Y0, Y0")
+	if !L.lut {
+		w("\tVPSUBD\tY11, Y0, Y0")
+	}
 	w("\tVCVTDQ2PS\tY0, Y0")
 	w("\tVCVTPH2PS\t(R9), Y14")
 	w("\tVPERMPS\tY14, Y15, Y14")
@@ -192,20 +268,20 @@ func x64GemvQ5_0_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tVBROADCASTSS\tX10, Y10")
 	w("\tVMULPS\tY10, Y14, Y14")
 	w("\tVFMADD231PS\tY14, Y0, Y2")
-	w("\tADDQ\t$%d, R9", q5_0x8BlockBytes)
+	w("\tADDQ\t$%d, R9", L.blockBytes)
 	w("\tADDQ\t$%d, DX", q8_0BlockBytes)
 	w("\tDECQ\tR8")
-	w("\tJNZ\tblk5")
-	w("store5:")
+	w("\tJNZ\tblk%s", L.lbl)
+	w("store%s:", L.lbl)
 	w("\tVPERMPS\tY2, Y15, Y2")
 	w("\tVMOVUPS\tY2, (DI)")
 	w("\tADDQ\t$32, DI")
 	w("\tDECQ\tR11")
-	w("\tJNZ\tgroup5")
-	w("done5:")
+	w("\tJNZ\tgroup%s", L.lbl)
+	w("done%s:", L.lbl)
 	w("\tVZEROUPPER")
 	w("\tRET")
-	w("oob5:")
+	w("oob%s:", L.lbl)
 	w("\tVZEROUPPER")
 	w("\tJMP\tovr_oob")
 	return sb.String()
@@ -221,20 +297,30 @@ func x64GemvQ5_0_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
 // unpack (Y9 low, Y10 high), Y12 the activation run, Y13 scratch,
 // Y14/Y15 epilogue scratch.
 func x64GemmQ5_0_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
+	return x64GemmX8Kernel(sym, pool, wide, q5_0x8L)
+}
+
+// x64GemmQ4_0_8x8Kernel emits the q4_0 8x8 GEMM (q5_0 tile, no fifth
+// bits, -8 through the block sums).
+func x64GemmQ4_0_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
+	return x64GemmX8Kernel(sym, pool, wide, q4_0x8L)
+}
+
+func x64GemmX8Kernel(sym string, pool *ConstPool, wide bool, L x8Layout) string {
 	var sb strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&sb, format+"\n", args...) }
 	c := "·" + pool.addBlob(x64Q5Consts())
 	sumOff := [4]int{0, 4, 16, 20}
-	w("// %s: q5_0 8x8 repack GEMM (AVX2), four activation rows per unpacked run; -16 folded through the block sums.", sym)
-	x64Q5Prologue(w, wide, true, "oob5")
+	w("// %s: %s 8x8 repack GEMM (AVX2), four activation rows per unpacked run; -%d folded through the block sums.", sym, L.name, x8Offset(L))
+	x64X8Prologue(w, wide, true, "oob"+L.lbl, L)
 	w("\tMOVQ\tR9, 160(SP)")  // vx
 	w("\tMOVQ\tDI, 168(SP)")  // output row-group base
 	w("\tMOVQ\tR11, 176(SP)") // column groups
-	w("rows5:")
+	w("rows%s:", L.lbl)
 	w("\tMOVQ\t160(SP), SI")
 	w("\tMOVQ\t168(SP), DI")
 	w("\tMOVQ\t176(SP), R11")
-	w("cols5:")
+	w("cols%s:", L.lbl)
 	w("\tVXORPS\tY0, Y0, Y0")
 	for i := 0; i < 4; i++ {
 		w("\tVMOVUPS\tY0, %d(SP)", 32+32*i)
@@ -243,8 +329,8 @@ func x64GemmQ5_0_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tMOVQ\tR10, DX")
 	w("\tMOVQ\tCX, R8")
 	w("\tTESTQ\tR8, R8")
-	w("\tJZ\tstore5")
-	w("blk5:")
+	w("\tJZ\tstore%s", L.lbl)
+	w("blk%s:", L.lbl)
 	// 16 x block sums of the four rows: the block's four 32-byte runs are
 	// [r0 8B | r1 8B | r2 8B | r3 8B]; pair-sum each with VPMADDUBSW
 	// against u8 ones, add the runs, fold to i32 and to per-row lanes.
@@ -258,23 +344,44 @@ func x64GemmQ5_0_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tVPADDW\tY10, Y8, Y8")
 	w("\tVPMADDWD\t%s+%d(SB), Y8, Y8", c, x64q5Ones16) // [r0 r0 r1 r1 | r2 r2 r3 r3]
 	w("\tVPHADDD\tY8, Y8, Y8")                         // [r0 r1 r0 r1 | r2 r3 r2 r3]
-	w("\tVPSLLD\t$4, Y8, Y8")
+	if L.lut {
+		w("\tVPXOR\tY8, Y8, Y8") // signed table: no quant offset to fold
+	} else {
+		w("\tVPSLLD\t$%d, Y8, Y8", L.shift)
+	}
 	w("\tVMOVDQU\tY8, 0(SP)")
 	for i := 0; i < 8; i++ {
 		w("\tVPXOR\tY%d, Y%d, Y%d", i, i, i)
 	}
 	for m := 0; m < 4; m++ {
-		x64Q5Unpack(w, c, m, 8, 9, 10, 11)
+		x64X8Unpack(w, c, m, 8, 9, 10, 11, L)
+		if L.lut {
+			// signed table: |w| in Y11 (lo) / Y8 (hi), both free after the
+			// unpack; each activation broadcast is signed by w before the
+			// u8 x s8 pair dot.
+			w("\tVPSIGNB\tY9, Y9, Y11")
+			w("\tVPSIGNB\tY10, Y10, Y8")
+		}
 		h := m % 2
 		klo, khi := m/2, 2+m/2
 		for r := 0; r < 4; r++ {
 			acc := 2*r + h
 			w("\tVPBROADCASTQ\t%d(DX), Y12", q8_0x4QsOff+32*klo+8*r)
-			w("\tVPMADDUBSW\tY12, Y9, Y13")
+			if L.lut {
+				w("\tVPSIGNB\tY9, Y12, Y13")
+				w("\tVPMADDUBSW\tY13, Y11, Y13")
+			} else {
+				w("\tVPMADDUBSW\tY12, Y9, Y13")
+			}
 			w("\tVPMADDWD\t%s+%d(SB), Y13, Y13", c, x64q5Ones16)
 			w("\tVPADDD\tY13, Y%d, Y%d", acc, acc)
 			w("\tVPBROADCASTQ\t%d(DX), Y12", q8_0x4QsOff+32*khi+8*r)
-			w("\tVPMADDUBSW\tY12, Y10, Y13")
+			if L.lut {
+				w("\tVPSIGNB\tY10, Y12, Y13")
+				w("\tVPMADDUBSW\tY13, Y8, Y13")
+			} else {
+				w("\tVPMADDUBSW\tY12, Y10, Y13")
+			}
 			w("\tVPMADDWD\t%s+%d(SB), Y13, Y13", c, x64q5Ones16)
 			w("\tVPADDD\tY13, Y%d, Y%d", acc, acc)
 		}
@@ -297,11 +404,11 @@ func x64GemmQ5_0_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
 		w("\tVFMADD231PS\tY8, Y14, Y9")
 		w("\tVMOVUPS\tY9, %d(SP)", 32+32*r)
 	}
-	w("\tADDQ\t$%d, R9", q5_0x8BlockBytes)
+	w("\tADDQ\t$%d, R9", L.blockBytes)
 	w("\tADDQ\t$%d, DX", q8_0x4BlockBytes)
 	w("\tDECQ\tR8")
-	w("\tJNZ\tblk5")
-	w("store5:")
+	w("\tJNZ\tblk%s", L.lbl)
+	w("store%s:", L.lbl)
 	w("\tVMOVDQU\t%s+%d(SB), Y13", c, x64q5Perm)
 	w("\tMOVQ\tDI, AX")
 	for r := 0; r < 4; r++ {
@@ -315,7 +422,7 @@ func x64GemmQ5_0_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tADDQ\t$32, DI")
 	w("\tADDQ\tR12, SI")
 	w("\tDECQ\tR11")
-	w("\tJNZ\tcols5")
+	w("\tJNZ\tcols%s", L.lbl)
 	// next row group: activations advance by nb blocks, outputs by 4 rows
 	w("\tIMUL3Q\t$%d, CX, AX", q8_0x4BlockBytes)
 	w("\tADDQ\tAX, R10")
@@ -323,12 +430,22 @@ func x64GemmQ5_0_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tADDQ\tR13, AX")
 	w("\tADDQ\tAX, 168(SP)")
 	w("\tDECQ\tBX")
-	w("\tJNZ\trows5")
-	w("done5:")
+	w("\tJNZ\trows%s", L.lbl)
+	w("done%s:", L.lbl)
 	w("\tVZEROUPPER")
 	w("\tRET")
-	w("oob5:")
+	w("oob%s:", L.lbl)
 	w("\tVZEROUPPER")
 	w("\tJMP\tovr_oob")
 	return sb.String()
+}
+
+// x8Offset is the quant offset the AVX2 bodies fold through the block
+// sums: 2^shift for the unsigned unpacks, none for the signed iq4_nl
+// table (its bodies use the abs/sign idiom instead).
+func x8Offset(L x8Layout) int {
+	if L.lut {
+		return 0
+	}
+	return 1 << L.shift
 }

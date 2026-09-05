@@ -55,6 +55,9 @@ var registry = map[string]verification{
 	"wasm-flash-attn-simd-widen.patch": {
 		reason: "verified by go-llama's native-parity tests against the released bundle",
 	},
+	"wasm-legacy-vec-dot-q4-1-q5-1-kernels.patch": {
+		verify: hasExports("dbg_vec_dot_q4_1_q8_1", "dbg_vec_dot_q5_1_q8_1"),
+	},
 	"wasm-q8-quantize-round-nearest.patch": {
 		reason: "verified by go-llama's native-parity and prompt batch-invariance tests against the released bundle",
 	},
@@ -62,6 +65,9 @@ var registry = map[string]verification{
 	// names must be present in the binary for wasm2go's assembly
 	// overrides (kernels/) to attach; a module without them silently
 	// runs the transpiled bodies instead.
+	"wasm-iq4-nl-kernels.patch": {
+		verify: hasExports("dbg_gemv_iq4_nl_8x8", "dbg_gemm_iq4_nl_8x8", "dbg_vec_dot_iq4_nl_q8_0"),
+	},
 	"wasm-kquant-vec-dot-kernels.patch": {
 		verify: hasExports("dbg_vec_dot_q5_0_q8_0", "dbg_vec_dot_q4_K_q8_K", "dbg_vec_dot_q6_K_q8_K"),
 	},
@@ -71,6 +77,12 @@ var registry = map[string]verification{
 	},
 	// The Q4_K 8x8 repack GEMV/GEMM exports (applied after the q8_0 repack
 	// patch that creates arch/wasm/repack.cpp).
+	"wasm-kquant-vec-dot-q2k-q3k-q5k-kernels.patch": {
+		verify: hasExports("dbg_vec_dot_q2_K_q8_K", "dbg_vec_dot_q3_K_q8_K", "dbg_vec_dot_q5_K_q8_K"),
+	},
+	"wasm-q8-repack-q4-0-kernels.patch": {
+		verify: hasExports("dbg_gemv_q4_0_8x8", "dbg_gemm_q4_0_8x8"),
+	},
 	"wasm-q8-repack-q4k-kernels.patch": {
 		verify: hasExports("dbg_gemv_q4_K_8x8", "dbg_gemm_q4_K_8x8"),
 	},
@@ -80,6 +92,15 @@ var registry = map[string]verification{
 	},
 	// The Q5_0 8x8 repack (block_q5_0x8, its GEMV/GEMM and the q8_0x4
 	// activation quantizer the GEMM consumes).
+	"wasm-vec-dot-q4-0-q8-0-kernels.patch": {
+		verify: hasExports("dbg_vec_dot_q4_0_q8_0", "dbg_vec_dot_q8_0_q8_0"),
+	},
+	"wasm-q8-repack-q5k-kernels.patch": {
+		verify: hasExports("dbg_gemv_q5_K_8x8", "dbg_gemm_q5_K_8x8"),
+	},
+	"wasm-q8-repack-q6k-kernels.patch": {
+		verify: hasExports("dbg_gemv_q6_K_8x8", "dbg_gemm_q6_K_8x8"),
+	},
 	"wasm-q8-repack-q5-0-kernels.patch": {
 		verify: hasExports("dbg_gemv_q5_0_8x8", "dbg_gemm_q5_0_8x8", "dbg_quantize_mat_q8_0_4x8"),
 	},

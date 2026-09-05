@@ -176,9 +176,10 @@ func a64VecDotQ4_KKernel(sym string, _ *ConstPool, wide bool) string {
 	e.ldurH(13, 3, 0) // x.d
 	e.fcvtSH(12, 12)
 	e.fcvtSH(13, 13)
-	e.fmulS(12, 12, 11) // dmin = y.d * x.dmin
-	e.fmulS(13, 13, 11) // d = y.d * x.d
-	e.scvtf4s(10, 10)
+	e.fmulS(12, 12, 11)      // dmin = y.d * x.dmin
+	e.fmulS(13, 13, 11)      // d = y.d * x.d
+	e.addv4s(10, 10)         // reduce first: the nrc == 2 tile converts per-block scalars, so
+	e.scvtf4s(10, 10)        // the single path must round the same way to stay bit-identical
 	e.fmlsLane(0, 10, 12, 0) // sumf -= dmin * mins-term
 	// --- the eight sub-blocks.
 	e.movi4s0(1)
@@ -205,6 +206,7 @@ func a64VecDotQ4_KKernel(sym string, _ *ConstPool, wide bool) string {
 		e.mlaLane(1, 30, scReg, lane)
 		e.mlaLane(1, 31, scReg, lane+1)
 	}
+	e.addv4s(1, 1)
 	e.scvtf4s(1, 1)
 	e.fmlaLane(0, 1, 13, 0) // sumf += d * (sumi1 + sumi2)
 	w("\tADD\t$%d, R3, R3", q4_KBlockBytes)

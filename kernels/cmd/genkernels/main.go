@@ -20,7 +20,7 @@ import (
 )
 
 func main() {
-	out := flag.String("out", "asm", "output directory for the bodies and overrides.json")
+	out := flag.String("out", "asm", "output directory for the bodies, overrides.json and kernels.json")
 	flag.Parse()
 	if err := run(*out); err != nil {
 		fmt.Fprintln(os.Stderr, "genkernels:", err)
@@ -47,5 +47,12 @@ func run(out string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(out, "overrides.json"), append(data, '\n'), 0o644)
+	if err := os.WriteFile(filepath.Join(out, "overrides.json"), append(data, '\n'), 0o644); err != nil {
+		return err
+	}
+	idx, err := json.MarshalIndent(man.Index(), "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(out, "kernels.json"), append(idx, '\n'), 0o644)
 }

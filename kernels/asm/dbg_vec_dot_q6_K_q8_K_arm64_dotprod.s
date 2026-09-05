@@ -222,12 +222,15 @@ q6kblk:
 	WORD $0x4e62810a // smlal2 v10.4s, v8.8h, v2.8h
 	WORD $0x0e63812a // smlal v10.4s, v9.4h, v3.4h
 	WORD $0x4e63812a // smlal2 v10.4s, v9.8h, v3.8h
-	WORD $0x4f25554a // shl v10.4s, v10.4s, #5
-	WORD $0x6eaa8421 // sub v1.4s, v1.4s, v10.4s
 	WORD $0xbc40008b // ldur s11, [x4, #0]
 	WORD $0x7c4d006d // ldur h13, [x3, #208]
 	WORD $0x1ee241ad // fcvt s13, h13
 	WORD $0x1e2b09ad // fmul s13, s13, s11
+	WORD $0x4f25554a // shl v10.4s, v10.4s, #5
+	WORD $0x4eb1b94a // addv s10, v10.4s
+	WORD $0x4e21d94a // scvtf v10.4s, v10.4s
+	WORD $0x4f8d5140 // fmls v0.4s, v10.4s, v13.s[0]
+	WORD $0x4eb1b821 // addv s1, v1.4s
 	WORD $0x4e21d821 // scvtf v1.4s, v1.4s
 	WORD $0x4f8d1020 // fmla v0.4s, v1.4s, v13.s[0]
 	ADD	$210, R3, R3

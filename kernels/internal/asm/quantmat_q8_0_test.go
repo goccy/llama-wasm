@@ -7,13 +7,13 @@ import (
 
 func TestQuantizeMatQ8_0_4x8KernelShape(t *testing.T) {
 	a := a64QuantizeMatQ8_0_4x8Kernel("FnQ8neon", true)
-	for _, want := range []string{"fcvtas v10.4s, v10.4s", "fcvt h10, s10", "str d13, [x7, #104]", "fmaxv s8, v8.4s"} {
+	for _, want := range []string{"fcvtns v10.4s, v10.4s", "fcvt h10, s10", "str d13, [x7, #104]", "fmaxv s8, v8.4s"} {
 		if !strings.Contains(a, want) {
 			t.Errorf("a64 kernel missing %q", want)
 		}
 	}
 	x := x64QuantizeMatQ8_0_4x8Kernel("FnQ8avx2", NewConstPool("t_"), true)
-	for _, want := range []string{"VCVTTPS2DQ\tY4, Y4", "VCVTPS2PH\t$0, X5, X5", "VMOVQ\tX4, 104(R10)", "MOVW\tAX, (R11)"} {
+	for _, want := range []string{"VCVTPS2DQ\tY4, Y4", "VCVTPS2PH\t$0, X5, X5", "VMOVQ\tX4, 104(R10)", "MOVW\tAX, (R11)"} {
 		if !strings.Contains(x, want) {
 			t.Errorf("x64 kernel missing %q", want)
 		}
@@ -21,8 +21,10 @@ func TestQuantizeMatQ8_0_4x8KernelShape(t *testing.T) {
 }
 
 // quantMatQ8RunSrc: the C body (ggml_quantize_mat_q8_0_4x8_generic) in
-// Go: d = amax/127, id = 1/d, q = roundf(x*id) (ties away from zero),
-// d stored as f16 (round to nearest even).
+// Go: d = amax/127, id = 1/d, q = round-to-nearest-even(x*id) (the
+// rounding of quantize_row_q8_0 and of the native SIMD quantizers; the
+// llama-wasm patch aligns the scalar body's roundf to it), d stored as
+// f16 (round to nearest even).
 const quantMatQ8RunSrc = `package quantmatrun
 
 import (
@@ -102,7 +104,7 @@ func reference(x [4][]float32, k int) []byte {
 			h := f16bits(d)
 			o[2*r], o[2*r+1] = byte(h), byte(h>>8)
 			for j := 0; j < 32; j++ {
-				q := math.Round(float64(float32(x[r][i*32+j] * id)))
+				q := math.RoundToEven(float64(float32(x[r][i*32+j] * id)))
 				o[8+(j/8)*32+r*8+j%8] = byte(int8(q))
 			}
 		}
@@ -112,7 +114,7 @@ func reference(x [4][]float32, k int) []byte {
 
 type quantKernel func(m *mockModule, l0, l1, l2 int64)
 
-func runQuantMat(t *testing.T, kernel quantKernel, k int, seed uint32, zeroRow int, scale float32) {
+func runQuantMat(t *testing.T, kernel quantKernel, k int, seed uint32, zeroRow int, scale float32, ties bool) {
 	t.Helper()
 	s := lcg(seed)
 	var x [4][]float32
@@ -123,6 +125,12 @@ func runQuantMat(t *testing.T, kernel quantKernel, k int, seed uint32, zeroRow i
 		for j := 0; j < k; j++ {
 			if r != zeroRow {
 				x[r][j] = s.unit() * scale
+				if ties {
+					x[r][j] = float32(int(s.next()%253)-126) + 0.5
+					if j%32 == 0 {
+						x[r][j] = 127
+					}
+				}
 			}
 			put32(mem, xOff+(r*k+j)*4, x[r][j])
 		}
@@ -160,9 +168,10 @@ func TestQuantMat(t *testing.T) {
 		for _, zeroRow := range []int{-1, 1} {
 			for _, scale := range []float32{1, 1e-3, 3e4, 127} {
 				seed++
-				runQuantMat(t, QuantKernel, k, seed, zeroRow, scale)
+				runQuantMat(t, QuantKernel, k, seed, zeroRow, scale, false)
 			}
 		}
+		runQuantMat(t, QuantKernel, k, seed, -1, 1, true)
 	}
 }
 `
