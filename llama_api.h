@@ -109,7 +109,10 @@ uint64_t llama_ctx_interrupt_addr(uint64_t ctx);
    creates a fresh pool with n_threads workers (poll=0, as llama_ctx_new)
    and attaches it, ABANDONING the inherited pool struct -- its memory is
    shared snapshot pages and its dead threads cannot be joined. n_threads
-   <= 1 detaches instead. Returns {"ok":true} or an error object. */
+   <= 1 detaches instead, and the context's n_threads / n_threads_batch
+   are set to the pool size (1 when detached) so graphs actually use the
+   workers. Returns {"ok":true,"n_threads":N,"n_threads_batch":N} — the
+   counts the context now computes with — or an error object. */
 std::string llama_ctx_attach_threadpool(uint64_t ctx, uint32_t n_threads);
 
 /* -------------------------------------------------------------- tokenizer */

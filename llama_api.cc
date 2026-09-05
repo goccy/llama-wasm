@@ -657,11 +657,19 @@ std::string llama_ctx_attach_threadpool(uint64_t ctx, uint32_t n_threads) {
     // worker threads belong to the snapshot builder and cannot be joined;
     // the struct itself lives in shared snapshot pages.
     st->threadpool = tp;
+    // The pool only supplies workers; how many of them a graph uses is the
+    // context's own n_threads (cparams), which llama_attach_threadpool
+    // leaves untouched. A context created single-threaded and then given
+    // an 8-worker pool would otherwise keep computing on one thread with
+    // seven workers idling, so set both counts to match the pool.
+    const int32_t n_compute = tp != nullptr ? (int32_t) n_threads : 1;
+    llama_set_n_threads(st->ctx, n_compute, n_compute);
 #else
     (void) n_threads;
     st->threadpool = nullptr;
 #endif
-    return "{\"ok\":true}";
+    return "{\"ok\":true,\"n_threads\":" + std::to_string(llama_n_threads(st->ctx)) +
+           ",\"n_threads_batch\":" + std::to_string(llama_n_threads_batch(st->ctx)) + "}";
 }
 
 /* -------------------------------------------------------------- tokenizer */
