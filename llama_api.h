@@ -92,6 +92,14 @@ uint64_t llama_model_load_progress_addr();
  *   n_ctx           0 = the model's training context length
  *   n_batch         logical batch size
  *   n_ubatch        physical batch size
+ *   n_seq_max       sequences the context holds at once (default 1)
+ *   kv_unified      non-zero: the sequences share one KV buffer of n_ctx
+ *                   cells (llama_memory_seq_cp is then metadata, not a copy,
+ *                   which the batched llama_ctx_score_choices and a shared
+ *                   prompt prefix across slots lean on); zero (llama.cpp's
+ *                   default) gives each sequence its own stream of
+ *                   n_ctx / n_seq_max cells, cheaper attention for
+ *                   independent sequences
  *   n_threads       0 = 1; a single-threaded wasm build clamps to 1
  *   embeddings      non-zero puts the context in embedding mode
  *   rope_freq_base  RoPE base frequency override (0 = model default)
@@ -235,16 +243,19 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
  * sampling parameters; a slot runs one task on its own KV sequence; one
  * update decodes a single batch drawn from every busy slot and samples each
  * of them. The context must be created with n_seq_max = the number of slots
- * (its KV cache is then unified across the sequences). While slots hold
+ * (see llama_ctx_new's kv_unified for how they share the cache). While slots hold
  * tasks the single-sequence entry points (generate, score, eval, embed,
  * state save/load) refuse to run; llama_ctx_reset drops every task.
  *
  * llama_ctx_slots_post queues a task. `task_json` is llama_ctx_generate's
  * params object plus a "prompt" string (cache_prompt is rejected; every
  * task decodes its own sequence). The prompt is tokenized with
- * add_special=true. A task whose prompt plus n_predict does not fit the
- * context window is refused; n_predict -1 means the rest of the window, so
- * such a task runs alone. Returns `{"ok":true,"id":N}`; ids start at 1. */
+ * add_special=true. A task whose prompt plus n_predict does not fit a
+ * sequence's window (n_ctx with kv_unified, n_ctx / n_seq_max without) is
+ * refused; n_predict -1 means the rest of the window. With kv_unified the
+ * busy slots also share the buffer, so a task launches only when its prompt
+ * plus n_predict fit next to what they may still write. Returns
+ * `{"ok":true,"id":N}`; ids start at 1. */
 std::string llama_ctx_slots_post(uint64_t ctx, const char *task_json,
                                  uint32_t task_json_len);
 

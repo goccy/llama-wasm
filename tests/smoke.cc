@@ -243,13 +243,17 @@ int main(int argc, char **argv) {
     }
     printf("sink: %d pieces: %s\n", sink.calls, sink.text.c_str());
 
-    // Slots (continuous batching). Three tasks posted to a four-slot context
-    // must produce, greedily, exactly what generating each of them alone
-    // produces, and the partial texts must concatenate to the final text.
-    {
-        const char *sctx_params = "{\"n_ctx\":256,\"n_threads\":1,\"n_seq_max\":4}";
+    // Slots (continuous batching), with per-sequence KV streams and with a
+    // shared buffer. Three tasks posted to a four-slot context must produce,
+    // greedily, exactly what generating each of them alone produces, and the
+    // partial texts must concatenate to the final text.
+    for (int unified = 0; unified < 2; unified++) {
+        const char *sctx_params = unified
+            ? "{\"n_ctx\":256,\"n_threads\":1,\"n_seq_max\":4,\"kv_unified\":1}"
+            : "{\"n_ctx\":1024,\"n_threads\":1,\"n_seq_max\":4}";
         uint64_t sctx = llama_ctx_new(model, sctx_params, (uint32_t) strlen(sctx_params));
         check(sctx != 0, "ctx_new with n_seq_max");
+        printf("slots: kv_unified=%d\n", unified);
         const char *prompts[3] = {"Once upon a time", "The little girl", "One day"};
         std::string alone[3];
         for (int i = 0; i < 3; i++) {

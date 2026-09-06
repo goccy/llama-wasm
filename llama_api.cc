@@ -621,8 +621,16 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
                 return 0;
             }
             cp.n_seq_max  = (uint32_t) d;
-            cp.kv_unified = true;
         }
+        // kv_unified follows llama.cpp: off by default, so each of the
+        // n_seq_max sequences gets its own stream of n_ctx / n_seq_max cells
+        // (attention over a sequence then costs only its own cells); on,
+        // the sequences share one buffer of n_ctx cells, where
+        // llama_memory_seq_cp is metadata rather than a copy — what
+        // llama_ctx_score_choices' batched path leans on, its sequences all
+        // sharing the stem prefix, and what a shared prompt prefix across
+        // slots needs.
+        if (opt_num(json, len, "kv_unified", d)) cp.kv_unified = d != 0;
         // A single-threaded wasm build has no usable pthread_create: ggml
         // asserts if asked for more than one thread, so clamp rather than
         // trap. A threads build honours the request.
@@ -1288,12 +1296,21 @@ std::string slot_final(const Slot &s, const char *stop_reason, bool interrupted)
     return out;
 }
 
-// slots_launch moves queued tasks into idle slots, in order, while the head
-// of the queue fits the cells the busy slots have not claimed. The queue is
-// FIFO: a head that does not fit keeps the tasks behind it waiting rather
-// than letting a smaller one overtake it.
+// kv_shared reports whether the sequences share one KV buffer (kv_unified)
+// — then admission budgets the buffer across the busy slots — or each has
+// its own stream of n_ctx_seq cells, where a task that fits a stream (checked
+// at post) can always launch into an idle slot.
+bool kv_shared(const CtxState *st) {
+    return llama_n_ctx_seq(st->ctx) == llama_n_ctx(st->ctx);
+}
+
+// slots_launch moves queued tasks into idle slots, in order. With a shared
+// buffer the head of the queue must also fit the cells the busy slots have
+// not claimed; the queue is FIFO either way: a head that does not fit keeps
+// the tasks behind it waiting rather than letting a smaller one overtake it.
 void slots_launch(CtxState *st, SlotsState *ss) {
     const int n_ctx = (int) llama_n_ctx(st->ctx);
+    const bool shared = kv_shared(st);
     const llama_vocab *vocab = llama_model_get_vocab(st->model);
     while (!ss->queue.empty()) {
         Slot *free_slot = nullptr;
@@ -1302,7 +1319,7 @@ void slots_launch(CtxState *st, SlotsState *ss) {
         }
         if (free_slot == nullptr) return;
         QueuedTask &t = ss->queue.front();
-        if (slots_reserved(ss) + (int) t.prompt.size() + t.budget > n_ctx) return;
+        if (shared && slots_reserved(ss) + (int) t.prompt.size() + t.budget > n_ctx) return;
         Slot &s = *free_slot;
         s.id_task = t.id;
         s.prompt = std::move(t.prompt);
@@ -1342,13 +1359,15 @@ std::string llama_ctx_slots_post(uint64_t ctx, const char *task_json,
             return json_err(err);
         }
         if (t.prompt.empty()) return json_err("slots_post: empty prompt");
-        const int n_ctx = (int) llama_n_ctx(st->ctx);
-        t.budget = sp.n_predict < 0 ? n_ctx - (int) t.prompt.size() : sp.n_predict;
+        // A sequence's window: the whole buffer when it is shared, its own
+        // stream otherwise (llama_n_ctx_seq is n_ctx / n_seq_max then).
+        const int n_ctx_seq = (int) llama_n_ctx_seq(st->ctx);
+        t.budget = sp.n_predict < 0 ? n_ctx_seq - (int) t.prompt.size() : sp.n_predict;
         if (t.budget < 0) t.budget = 0;
-        if ((int) t.prompt.size() + t.budget > n_ctx) {
+        if ((int) t.prompt.size() + t.budget > n_ctx_seq) {
             return json_err("slots_post: prompt (" + std::to_string(t.prompt.size()) +
                             " tokens) plus n_predict (" + std::to_string(t.budget) +
-                            ") exceeds the context window (" + std::to_string(n_ctx) + ")");
+                            ") exceeds a sequence's window (" + std::to_string(n_ctx_seq) + ")");
         }
         t.sp = sp;
         SlotsState *ss = slots_of(st);
