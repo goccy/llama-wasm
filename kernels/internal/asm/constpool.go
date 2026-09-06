@@ -1,6 +1,7 @@
 package asm
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"sort"
 	"strings"
@@ -24,12 +25,16 @@ func NewConstPool(prefix string) *ConstPool {
 }
 
 // addBlob interns blob by content and returns the symbol to reference
-// it by (as ·<name>(SB)).
+// it by (as ·<name>(SB)). The symbol carries the blob's length and the
+// first 16 hex digits of its SHA-256, which distinguishes blobs without
+// spelling their bytes into the name — a 16 KiB codebook named by content
+// made every DATA line 32 KiB and its file 64 MB.
 func (p *ConstPool) addBlob(blob []byte) string {
 	if p.blobs == nil {
 		p.blobs = map[string][]byte{}
 	}
-	name := fmt.Sprintf("ovr_%sb%d_%x", p.prefix, len(blob), blob)
+	sum := sha256.Sum256(blob)
+	name := fmt.Sprintf("ovr_%sb%d_%x", p.prefix, len(blob), sum[:8])
 	p.blobs[name] = append([]byte(nil), blob...)
 	return name
 }

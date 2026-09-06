@@ -26,7 +26,7 @@ import (
 //	544: get_scale_shuffle    (8 rows x 16 bytes: row r is 2r x8, 2r+1 x8)
 //	672: end
 func x64QuantConsts() []byte {
-	c := make([]byte, 832)
+	c := make([]byte, 992)
 	fill := func(off int, b byte) {
 		for i := 0; i < 32; i++ {
 			c[off+i] = b
@@ -52,6 +52,10 @@ func x64QuantConsts() []byte {
 	fill(800, 0x10) // q5_1 fifth bit
 	for i := 0; i < 32; i++ {
 		c[768+i] = byte(kvaluesIQ4NL[i%16]) // iq4_nl table (signed), both lanes
+		c[832+i] = byte(kvaluesFP4[i%16])   // mxfp4 table (signed), both lanes
+		c[896+i] = byte(i / 8)              // VPSHUFB index spreading 4 sign bytes over 8-lane groups
+		c[928+i] = 1 << (i % 8)             // kmask 1,2,..,128 x4
+		c[960+i] = byte(i / 16)             // VPSHUFB index spreading 2 bytes over 16-lane halves
 	}
 	fill(160, 0x03)
 	fill(192, 0x0c)
@@ -71,22 +75,26 @@ func x64QuantConsts() []byte {
 }
 
 const (
-	x64qcLow   = 0
-	x64qcHigh  = 32
-	x64qcOnes  = 64
-	x64qcBits  = 96
-	x64qcBitM  = 128
-	x64qcM3    = 160
-	x64qcM12   = 192
-	x64qcM48   = 224
-	x64qcM192  = 256
-	x64qcK4    = 288
-	x64qcScale = 544
-	x64qcB1    = 672
-	x64qcB2    = 704
-	x64qcM32   = 736
-	x64qcNL    = 768
-	x64qcM16   = 800
+	x64qcLow     = 0
+	x64qcHigh    = 32
+	x64qcOnes    = 64
+	x64qcBits    = 96
+	x64qcBitM    = 128
+	x64qcM3      = 160
+	x64qcM12     = 192
+	x64qcM48     = 224
+	x64qcM192    = 256
+	x64qcK4      = 288
+	x64qcScale   = 544
+	x64qcB1      = 672
+	x64qcB2      = 704
+	x64qcM32     = 736
+	x64qcNL      = 768
+	x64qcM16     = 800
+	x64qcFP4     = 832
+	x64qcSpread  = 896
+	x64qcKmask   = 928
+	x64qcSpread2 = 960
 )
 
 // x64VecDotPrologue: CX = n >> shift, DI = s (host), SI = x (host), DX
@@ -752,21 +760,35 @@ func x64VecDotQ3_KKernel(sym string, pool *ConstPool, wide bool) string {
 }
 
 // x64VecDotIQ4NLKernel: iq4_nl x q8_0 on AVX2 (see a64VecDotIQ4NLKernel):
-// nibbles to bytes, VPSHUFB through the signed kvalues table, then the
-// sign-trick u8 x s8 pair dot.
+// nibbles through the kvalues table (VPSHUFB), then the sign-trick u8 x s8
+// pair dot.
 func x64VecDotIQ4NLKernel(sym string, pool *ConstPool, wide bool) string {
+	return x64VecDotLUT32(sym, pool, wide, lut32IQ4NL)
+}
+
+// x64VecDotMXFP4Kernel: mxfp4 x q8_0 on AVX2, the same body with the fp4
+// table and an E8M0 block scale.
+func x64VecDotMXFP4Kernel(sym string, pool *ConstPool, wide bool) string {
+	return x64VecDotLUT32(sym, pool, wide, lut32MXFP4)
+}
+
+func x64VecDotLUT32(sym string, pool *ConstPool, wide bool, L lut32Layout) string {
 	var sb strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&sb, format+"\n", args...) }
 	cSym := pool.addBlob(x64QuantConsts())
-	w("// %s: iq4_nl x q8_0 dot (AVX2).", sym)
+	tbl := x64qcNL
+	if L.e8m0 {
+		tbl = x64qcFP4
+	}
+	w("// %s: %s x q8_0 dot (AVX2).", sym, L.name)
 	w("\tVXORPS\tY0, Y0, Y0")
-	x64VecDotPrologue(w, wide, 5, iq4_nlBlockBytes, q8_0BlockBytes, "iq4oob", "iq4reduce")
+	x64VecDotPrologue(w, wide, 5, L.blockBytes, q8_0BlockBytes, L.lbl+"oob", L.lbl+"reduce")
 	w("\tVMOVDQU\t·%s+%d(SB), Y8", cSym, x64qcLow)
 	w("\tVMOVDQU\t·%s+%d(SB), Y10", cSym, x64qcOnes)
-	w("\tVMOVDQU\t·%s+%d(SB), Y11", cSym, x64qcNL)
-	w("iq4blk:")
-	// qx = kvalues[bytes_from_nibbles_32(qs)]
-	w("\tVMOVDQU\t2(SI), X2")
+	w("\tVMOVDQU\t·%s+%d(SB), Y11", cSym, tbl)
+	w("%sblk:", L.lbl)
+	// qx = table[bytes_from_nibbles_32(qs)]
+	w("\tVMOVDQU\t%d(SI), X2", L.qsOff)
 	w("\tVPSRLW\t$4, X2, X3")
 	w("\tVINSERTI128\t$1, X3, Y2, Y2")
 	w("\tVPAND\tY8, Y2, Y2")
@@ -778,21 +800,113 @@ func x64VecDotIQ4NLKernel(sym string, pool *ConstPool, wide bool) string {
 	w("\tVPMADDUBSW\tY4, Y5, Y5")
 	w("\tVPMADDWD\tY10, Y5, Y5")
 	w("\tVCVTDQ2PS\tY5, Y5")
-	// d = f16(x.d) * f16(y.d)
-	x64F16Scalar(w, "SI", 0, 6)
+	if L.e8m0 {
+		x64E8M0Half(w, "SI", 0, 6)
+	} else {
+		x64F16Scalar(w, "SI", 0, 6)
+	}
 	x64F16Scalar(w, "DX", 0, 7)
 	w("\tVMULSS\tX7, X6, X6")
 	w("\tVBROADCASTSS\tX6, Y6")
 	w("\tVFMADD231PS\tY5, Y6, Y0")
-	w("\tADDQ\t$%d, SI", iq4_nlBlockBytes)
+	w("\tADDQ\t$%d, SI", L.blockBytes)
 	w("\tADDQ\t$%d, DX", q8_0BlockBytes)
 	w("\tDECQ\tCX")
-	w("\tJNZ\tiq4blk")
-	w("iq4reduce:")
+	w("\tJNZ\t%sblk", L.lbl)
+	w("%sreduce:", L.lbl)
 	x64Hsum8Store(w, false)
 	w("\tVZEROUPPER")
 	w("\tRET")
-	w("iq4oob:")
+	w("%soob:", L.lbl)
+	w("\tVZEROUPPER")
+	w("\tJMP\tovr_oob")
+	return sb.String()
+}
+
+// x64E8M0Half loads the E8M0 byte at off(reg) and leaves
+// ggml_e8m0_to_fp32_half of it (2^(e-128), denormal for e < 2) in X<dst>:
+// bits = e >= 2 ? (e-1) << 23 : 0x00200000 << e. R9-R11 are scratch.
+func x64E8M0Half(w func(string, ...any), reg string, off, dst int) {
+	w("\tMOVBLZX\t%d(%s), R9", off, reg)
+	w("\tLEAL\t-1(R9), R10")
+	w("\tSHLL\t$23, R10")
+	w("\tIMUL3L\t$0x00200000, R9, R11") // 0x00200000 << e for e in {0, 1}
+	w("\tADDL\t$0x00200000, R11")
+	w("\tCMPL\tR9, $2")
+	w("\tCMOVLCS\tR11, R10") // e < 2: the denormal pattern
+	w("\tVMOVD\tR10, X%d", dst)
+}
+
+// x64VecDotIQ4XSKernel: iq4_xs x q8_K on AVX2 (see a64VecDotIQ4XSKernel):
+// per 32-quant sub-block the kvalues lookup and sign-trick pair dot give
+// eight i32 lanes, multiplied by the sub-block's 6-bit scale and summed
+// over the super-block in i32; the block's f16 d times the activation
+// block's f32 d scales the total once.
+func x64VecDotIQ4XSKernel(sym string, pool *ConstPool, wide bool) string {
+	var sb strings.Builder
+	w := func(format string, args ...any) { fmt.Fprintf(&sb, format+"\n", args...) }
+	cSym := pool.addBlob(x64QuantConsts())
+	w("// %s: iq4_xs x q8_K dot (AVX2).", sym)
+	w("\tVXORPS\tY0, Y0, Y0")
+	x64VecDotPrologue(w, wide, 8, iq4_xsBlockBytes, q8_KBlockBytes, "ixoob", "ixreduce")
+	w("\tVMOVDQU\t·%s+%d(SB), Y8", cSym, x64qcLow)
+	w("\tVMOVDQU\t·%s+%d(SB), Y10", cSym, x64qcOnes)
+	w("\tVMOVDQU\t·%s+%d(SB), Y11", cSym, x64qcNL)
+	w("ixblk:")
+	w("\tVPXOR\tY1, Y1, Y1")   // i32 super-block sum
+	w("\tMOVWLZX\t2(SI), R12") // scales_h
+	w("\tMOVL\t4(SI), R13")    // scales_l
+	for ib := 0; ib < 8; ib++ {
+		w("\tVMOVDQU\t%d(SI), X2", 8+16*ib)
+		w("\tVPSRLW\t$4, X2, X3")
+		w("\tVINSERTI128\t$1, X3, Y2, Y2")
+		w("\tVPAND\tY8, Y2, Y2")
+		w("\tVPSHUFB\tY2, Y11, Y2")
+		w("\tVMOVDQU\t%d(DX), Y4", 4+32*ib)
+		w("\tVPSIGNB\tY2, Y2, Y5")
+		w("\tVPSIGNB\tY2, Y4, Y4")
+		w("\tVPMADDUBSW\tY4, Y5, Y5")
+		w("\tVPMADDWD\tY10, Y5, Y5")
+		// ls = (scales_l nibble | (scales_h bits) << 4) - 32
+		if ib%2 == 0 {
+			w("\tMOVL\tR13, R10")
+			w("\tANDL\t$0xf, R10")
+			w("\tMOVL\tR12, R11")
+			w("\tSHLL\t$4, R11")
+		} else {
+			w("\tMOVL\tR13, R10")
+			w("\tSHRL\t$4, R10")
+			w("\tANDL\t$0xf, R10")
+			w("\tMOVL\tR12, R11")
+			w("\tSHLL\t$2, R11")
+		}
+		w("\tANDL\t$0x30, R11")
+		w("\tORL\tR11, R10")
+		w("\tSUBL\t$32, R10")
+		w("\tVMOVD\tR10, X6")
+		w("\tVPBROADCASTD\tX6, Y6")
+		w("\tVPMULLD\tY6, Y5, Y5")
+		w("\tVPADDD\tY5, Y1, Y1")
+		if ib%2 == 1 && ib < 7 {
+			w("\tSHRL\t$4, R12")
+			w("\tSHRL\t$8, R13")
+		}
+	}
+	w("\tVCVTDQ2PS\tY1, Y1")
+	x64F16Scalar(w, "SI", 0, 6)
+	w("\tVMOVSS\t0(DX), X7")
+	w("\tVMULSS\tX7, X6, X6")
+	w("\tVBROADCASTSS\tX6, Y6")
+	w("\tVFMADD231PS\tY1, Y6, Y0")
+	w("\tADDQ\t$%d, SI", iq4_xsBlockBytes)
+	w("\tADDQ\t$%d, DX", q8_KBlockBytes)
+	w("\tDECQ\tCX")
+	w("\tJNZ\tixblk")
+	w("ixreduce:")
+	x64Hsum8Store(w, false)
+	w("\tVZEROUPPER")
+	w("\tRET")
+	w("ixoob:")
 	w("\tVZEROUPPER")
 	w("\tJMP\tovr_oob")
 	return sb.String()
@@ -936,6 +1050,294 @@ func x64VecDotLegacy(sym string, pool *ConstPool, wide bool, kind string, xBlock
 	w("\tVZEROUPPER")
 	w("\tRET")
 	w("%soob:", lbl)
+	w("\tVZEROUPPER")
+	w("\tJMP\tovr_oob")
+	return sb.String()
+}
+
+// x64VecDotIQ3XXSKernel / x64VecDotIQ3SKernel: the iq3 dots on AVX2 (see
+// vecdot_iq3_a64.go). The 32 magnitudes of a sub-block are gathered as
+// eight grid words through VPINSRD, the signs land in Y4 as +-1 bytes
+// (iq3_xxs: four u64 gathers from the keven table; iq3_s: the four sign
+// bytes spread with VPSHUFB, tested against kmask, or'ed with 1) and are
+// applied to the activation bytes with VPSIGNB so the unsigned magnitudes
+// take the u8 side of VPMADDUBSW.
+func x64VecDotIQ3XXSKernel(sym string, pool *ConstPool, wide bool) string {
+	return x64VecDotIQ3(sym, pool, wide, false)
+}
+
+func x64VecDotIQ3SKernel(sym string, pool *ConstPool, wide bool) string {
+	return x64VecDotIQ3(sym, pool, wide, true)
+}
+
+func x64VecDotIQ3(sym string, pool *ConstPool, wide bool, iq3s bool) string {
+	var sb strings.Builder
+	w := func(format string, args ...any) { fmt.Fprintf(&sb, format+"\n", args...) }
+	cSym := pool.addBlob(x64QuantConsts())
+	name, lbl, blockBytes := "iq3_xxs", "i3x", iq3_xxsBlockBytes
+	grid := pool.addBlob(iq3xxsConsts())
+	if iq3s {
+		name, lbl, blockBytes = "iq3_s", "i3s", iq3_sBlockBytes
+		grid = pool.addBlob(iq3sConsts())
+	}
+	w("// %s: %s x q8_K dot (AVX2), grid gathers through VPINSRD, signs applied to the activations.", sym, name)
+	w("\tVXORPS\tY0, Y0, Y0")
+	x64VecDotPrologue(w, wide, 8, blockBytes, q8_KBlockBytes, lbl+"oob", lbl+"reduce")
+	w("\tMOVQ\t$·%s(SB), R12", grid)
+	if !iq3s {
+		w("\tLEAQ\t1024(R12), R13") // the keven sign table
+	}
+	w("\tVMOVDQU\t·%s+%d(SB), Y10", cSym, x64qcOnes)
+	if iq3s {
+		w("\tVMOVDQU\t·%s+%d(SB), Y11", cSym, x64qcSpread)
+		w("\tVMOVDQU\t·%s+%d(SB), Y12", cSym, x64qcKmask)
+		w("\tVMOVDQU\t·%s+%d(SB), Y13", cSym, x64qcB1)
+	}
+	w("%sblk:", lbl)
+	w("\tVPXOR\tY1, Y1, Y1")
+	for ib := 0; ib < 8; ib++ {
+		if iq3s {
+			w("\tMOVBLZX\t%d(SI), R10", 66+ib) // ninth index bits
+		}
+		for k := 0; k < 8; k++ {
+			w("\tMOVBLZX\t%d(SI), R14", 2+8*ib+k)
+			if iq3s {
+				w("\tMOVL\tR10, R11")
+				w("\tSHRL\t$%d, R11", k)
+				w("\tANDL\t$1, R11")
+				w("\tSHLL\t$8, R11")
+				w("\tORL\tR11, R14")
+			}
+			w("\tMOVL\t(R12)(R14*4), R15")
+			if k < 4 {
+				w("\tVPINSRD\t$%d, R15, X2, X2", k)
+			} else {
+				w("\tVPINSRD\t$%d, R15, X5, X5", k-4)
+			}
+		}
+		w("\tVINSERTI128\t$1, X5, Y2, Y2") // 32 magnitudes
+		if iq3s {
+			w("\tMOVL\t%d(SI), R9", 74+4*ib)
+			w("\tVMOVD\tR9, X4")
+			w("\tVPBROADCASTD\tX4, Y4")
+			w("\tVPSHUFB\tY11, Y4, Y4") // [s0 x8 | s1 x8 | s2 x8 | s3 x8]
+			w("\tVPAND\tY12, Y4, Y4")
+			w("\tVPCMPEQB\tY12, Y4, Y4") // 0xff where the sign bit is set
+			w("\tVPOR\tY13, Y4, Y4")     // -1 / +1
+		} else {
+			w("\tMOVL\t%d(SI), R9", 66+4*ib) // sign codes | scale
+			for l := 0; l < 4; l++ {
+				w("\tMOVL\tR9, R14")
+				w("\tSHRL\t$%d, R14", 7*l)
+				w("\tANDL\t$127, R14")
+				w("\tMOVQ\t(R13)(R14*8), R15")
+				if l < 2 {
+					w("\tVPINSRQ\t$%d, R15, X4, X4", l)
+				} else {
+					w("\tVPINSRQ\t$%d, R15, X7, X7", l-2)
+				}
+			}
+			w("\tVINSERTI128\t$1, X7, Y4, Y4")
+		}
+		w("\tVMOVDQU\t%d(DX), Y3", 4+32*ib)
+		w("\tVPSIGNB\tY4, Y3, Y3") // activations signed by the quant signs
+		w("\tVPMADDUBSW\tY3, Y2, Y5")
+		w("\tVPMADDWD\tY10, Y5, Y5")
+		if iq3s {
+			w("\tMOVBLZX\t%d(SI), R8", 106+ib/2)
+			if ib%2 == 0 {
+				w("\tANDL\t$0xf, R8")
+			} else {
+				w("\tSHRL\t$4, R8")
+			}
+		} else {
+			w("\tMOVL\tR9, R8")
+			w("\tSHRL\t$28, R8")
+		}
+		w("\tLEAL\t1(R8)(R8*1), R8") // ls = 2*nibble + 1
+		w("\tVMOVD\tR8, X6")
+		w("\tVPBROADCASTD\tX6, Y6")
+		w("\tVPMULLD\tY6, Y5, Y5")
+		w("\tVPADDD\tY5, Y1, Y1")
+	}
+	w("\tVCVTDQ2PS\tY1, Y1")
+	x64F16Scalar(w, "SI", 0, 6)
+	w("\tVMOVSS\t0(DX), X7")
+	w("\tVMULSS\tX7, X6, X6")
+	if !iq3s {
+		w("\tMOVL\t$0x3E800000, R8") // 0.25f
+		w("\tVMOVD\tR8, X7")
+		w("\tVMULSS\tX7, X6, X6")
+	}
+	w("\tVBROADCASTSS\tX6, Y6")
+	w("\tVFMADD231PS\tY1, Y6, Y0")
+	w("\tADDQ\t$%d, SI", blockBytes)
+	w("\tADDQ\t$%d, DX", q8_KBlockBytes)
+	w("\tDECQ\tCX")
+	w("\tJNZ\t%sblk", lbl)
+	w("%sreduce:", lbl)
+	x64Hsum8Store(w, false)
+	w("\tVZEROUPPER")
+	w("\tRET")
+	w("%soob:", lbl)
+	w("\tVZEROUPPER")
+	w("\tJMP\tovr_oob")
+	return sb.String()
+}
+
+// x64VecDotIQ2XXSKernel / x64VecDotIQ2XSKernel / x64VecDotIQ2SKernel: the
+// iq2 dots on AVX2 (see vecdot_iq2_a64.go): four u64 grid gathers per
+// sub-block through VPINSRQ, signs as +-1 bytes applied to the activations
+// with VPSIGNB, VPMADDUBSW/VPMADDWD into eight i32 lanes weighted by the
+// per-16-quant scales [ls1 x4 | ls2 x4] (one scale for iq2_xxs).
+func x64VecDotIQ2XXSKernel(sym string, pool *ConstPool, wide bool) string {
+	return x64VecDotIQ2(sym, pool, wide, iq2xxsL)
+}
+func x64VecDotIQ2XSKernel(sym string, pool *ConstPool, wide bool) string {
+	return x64VecDotIQ2(sym, pool, wide, iq2xsL)
+}
+func x64VecDotIQ2SKernel(sym string, pool *ConstPool, wide bool) string {
+	return x64VecDotIQ2(sym, pool, wide, iq2sL)
+}
+
+func x64VecDotIQ2(sym string, pool *ConstPool, wide bool, L iq2Layout) string {
+	var sb strings.Builder
+	w := func(format string, args ...any) { fmt.Fprintf(&sb, format+"\n", args...) }
+	cSym := pool.addBlob(x64QuantConsts())
+	grid := pool.addBlob(iq2Consts(L))
+	w("// %s: %s x q8_K dot (AVX2), u64 grid gathers through VPINSRQ, signs applied to the activations.", sym, L.name)
+	w("\tVXORPS\tY0, Y0, Y0")
+	x64VecDotPrologue(w, wide, 8, L.blockBytes, q8_KBlockBytes, L.lbl+"oob", L.lbl+"reduce")
+	w("\tMOVQ\t$·%s(SB), R12", grid)
+	w("\tLEAQ\t%d(R12), R13", L.gridBytes) // sign table / spread constants
+	w("\tVMOVDQU\t·%s+%d(SB), Y10", cSym, x64qcOnes)
+	if L.name == "iq2_s" {
+		w("\tVMOVDQU\t·%s+%d(SB), Y11", cSym, x64qcSpread)
+		w("\tVMOVDQU\t·%s+%d(SB), Y12", cSym, x64qcKmask)
+		w("\tVMOVDQU\t·%s+%d(SB), Y13", cSym, x64qcB1)
+	}
+	w("%sblk:", L.lbl)
+	w("\tVPXOR\tY1, Y1, Y1")
+	for ib := 0; ib < 8; ib++ {
+		switch L.name {
+		case "iq2_xxs":
+			w("\tMOVQ\t%d(SI), R9", 2+8*ib) // indices | codes | scale
+			for l := 0; l < 4; l++ {
+				w("\tMOVQ\tR9, R14")
+				w("\tSHRQ\t$%d, R14", 8*l)
+				w("\tANDL\t$0xff, R14")
+				w("\tMOVQ\t(R12)(R14*8), R15")
+				if l < 2 {
+					w("\tVPINSRQ\t$%d, R15, X2, X2", l)
+				} else {
+					w("\tVPINSRQ\t$%d, R15, X5, X5", l-2)
+				}
+				w("\tMOVQ\tR9, R14")
+				w("\tSHRQ\t$%d, R14", 32+7*l)
+				w("\tANDL\t$127, R14")
+				w("\tMOVQ\t(R13)(R14*8), R15")
+				if l < 2 {
+					w("\tVPINSRQ\t$%d, R15, X4, X4", l)
+				} else {
+					w("\tVPINSRQ\t$%d, R15, X7, X7", l-2)
+				}
+			}
+			w("\tVINSERTI128\t$1, X7, Y4, Y4")
+		case "iq2_xs":
+			w("\tMOVQ\t%d(SI), R9", 2+8*ib) // four u16: index | code << 9
+			for l := 0; l < 4; l++ {
+				w("\tMOVQ\tR9, R14")
+				w("\tSHRQ\t$%d, R14", 16*l)
+				w("\tMOVL\tR14, R8")
+				w("\tANDL\t$511, R14")
+				w("\tMOVQ\t(R12)(R14*8), R15")
+				if l < 2 {
+					w("\tVPINSRQ\t$%d, R15, X2, X2", l)
+				} else {
+					w("\tVPINSRQ\t$%d, R15, X5, X5", l-2)
+				}
+				w("\tSHRL\t$9, R8")
+				w("\tANDL\t$127, R8")
+				w("\tMOVQ\t(R13)(R8*8), R15")
+				if l < 2 {
+					w("\tVPINSRQ\t$%d, R15, X4, X4", l)
+				} else {
+					w("\tVPINSRQ\t$%d, R15, X7, X7", l-2)
+				}
+			}
+			w("\tVINSERTI128\t$1, X7, Y4, Y4")
+		default: // iq2_s
+			w("\tMOVBLZX\t%d(SI), R10", 66+ib) // two high index bits per group
+			for l := 0; l < 4; l++ {
+				w("\tMOVBLZX\t%d(SI), R14", 2+4*ib+l)
+				w("\tMOVL\tR10, R11")
+				w("\tSHRL\t$%d, R11", 2*l)
+				w("\tANDL\t$3, R11")
+				w("\tSHLL\t$8, R11")
+				w("\tORL\tR11, R14")
+				w("\tMOVQ\t(R12)(R14*8), R15")
+				if l < 2 {
+					w("\tVPINSRQ\t$%d, R15, X2, X2", l)
+				} else {
+					w("\tVPINSRQ\t$%d, R15, X5, X5", l-2)
+				}
+			}
+			w("\tMOVL\t%d(SI), R9", 34+4*ib) // four sign bytes
+			w("\tVMOVD\tR9, X4")
+			w("\tVPBROADCASTD\tX4, Y4")
+			w("\tVPSHUFB\tY11, Y4, Y4")
+			w("\tVPAND\tY12, Y4, Y4")
+			w("\tVPCMPEQB\tY12, Y4, Y4")
+			w("\tVPOR\tY13, Y4, Y4")
+		}
+		w("\tVINSERTI128\t$1, X5, Y2, Y2") // 32 magnitudes
+		w("\tVMOVDQU\t%d(DX), Y3", 4+32*ib)
+		w("\tVPSIGNB\tY4, Y3, Y3")
+		w("\tVPMADDUBSW\tY3, Y2, Y5")
+		w("\tVPMADDWD\tY10, Y5, Y5")
+		if L.twoScales {
+			scOff := 66 + ib
+			if L.name == "iq2_s" {
+				scOff = 74 + ib
+			}
+			w("\tMOVBLZX\t%d(SI), R8", scOff)
+			w("\tMOVL\tR8, R9")
+			w("\tANDL\t$0xf, R8")
+			w("\tSHRL\t$4, R9")
+			w("\tLEAL\t1(R8)(R8*1), R8") // ls1
+			w("\tLEAL\t1(R9)(R9*1), R9") // ls2
+			w("\tVMOVD\tR8, X6")
+			w("\tVMOVD\tR9, X7")
+			w("\tVPBROADCASTD\tX6, X6")
+			w("\tVPBROADCASTD\tX7, X7")
+			w("\tVINSERTI128\t$1, X7, Y6, Y6") // [ls1 x4 | ls2 x4]
+		} else {
+			w("\tSHRQ\t$60, R9")
+			w("\tLEAL\t1(R9)(R9*1), R9") // ls = 2*(aux >> 28) + 1
+			w("\tVMOVD\tR9, X6")
+			w("\tVPBROADCASTD\tX6, Y6")
+		}
+		w("\tVPMULLD\tY6, Y5, Y5")
+		w("\tVPADDD\tY5, Y1, Y1")
+	}
+	w("\tVCVTDQ2PS\tY1, Y1")
+	x64F16Scalar(w, "SI", 0, 6)
+	w("\tVMOVSS\t0(DX), X7")
+	w("\tVMULSS\tX7, X6, X6")
+	w("\tMOVL\t$0x3E000000, R8") // 0.125f
+	w("\tVMOVD\tR8, X7")
+	w("\tVMULSS\tX7, X6, X6")
+	w("\tVBROADCASTSS\tX6, Y6")
+	w("\tVFMADD231PS\tY1, Y6, Y0")
+	w("\tADDQ\t$%d, SI", L.blockBytes)
+	w("\tADDQ\t$%d, DX", q8_KBlockBytes)
+	w("\tDECQ\tCX")
+	w("\tJNZ\t%sblk", L.lbl)
+	w("%sreduce:", L.lbl)
+	x64Hsum8Store(w, false)
+	w("\tVZEROUPPER")
+	w("\tRET")
+	w("%soob:", L.lbl)
 	w("\tVZEROUPPER")
 	w("\tJMP\tovr_oob")
 	return sb.String()

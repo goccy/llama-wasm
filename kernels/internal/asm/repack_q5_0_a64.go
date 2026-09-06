@@ -39,6 +39,15 @@ type x8Layout struct {
 	lut        bool // iq4_nl: nibbles index the kvalues table (signed bytes)
 	noBias     bool // iq4_nl on arm64: signed quants, no offset term
 	xor        int  // q4_0: llama.cpp's make_block_q4_0x8 stores nibble ^ 8 (0x88 per byte); undo it
+	e8m0       bool // mxfp4: the eight column scales are E8M0 bytes (ggml_e8m0_to_fp32_half) and the table is kvalues_fp4
+}
+
+// lutOff is the offset of L's nibble table in the constant blob.
+func (L x8Layout) lutOff() int {
+	if L.e8m0 {
+		return q5x8FP4Off
+	}
+	return q5x8LUTOff
 }
 
 var (
@@ -49,6 +58,9 @@ var (
 	// AVX2 bodies use the table + 127 (unsigned) and fold 127 x the block
 	// sums back out.
 	iq4_nlx8L = x8Layout{name: "iq4_nl", lbl: "i", blockBytes: 144, qsOff: 16, lut: true, noBias: true}
+	// block_mxfp4x8: e[8] (E8M0 scales) | qs[128] in 8-byte interleaved
+	// groups (llama.cpp's make_block_mxfp4x8), 136 bytes.
+	mxfp4x8L = x8Layout{name: "mxfp4", lbl: "x", blockBytes: 136, qsOff: 8, lut: true, noBias: true, e8m0: true}
 )
 
 // kvaluesIQ4NL is llama.cpp's kvalues_iq4nl.
@@ -69,17 +81,58 @@ const (
 // low-nibble fifth bits (byte 0 x8, byte 1 x8); 32: for the high-nibble
 // ones (byte 2 x8, byte 3 x8); 48: kvalues_iq4nl (signed).
 func q5x8Consts() []byte {
-	c := make([]byte, 64)
+	c := make([]byte, 80)
 	for i := 0; i < 16; i++ {
 		c[i] = 1 << (i % 8)
 		c[16+i] = byte(i / 8)
 		c[32+i] = byte(2 + i/8)
 		c[48+i] = byte(kvaluesIQ4NL[i])
+		c[64+i] = byte(kvaluesFP4[i])
 	}
 	return c
 }
 
-const q5x8LUTOff = 48
+const (
+	q5x8LUTOff = 48 // kvalues_iq4nl
+	q5x8FP4Off = 64 // kvalues_fp4 (mxfp4)
+)
+
+// x8Scales leaves the block's eight column scales as f32 in lo (columns
+// 0..3) and hi (4..7): the f16 pairs widened, or for E8M0 blocks
+// ggml_e8m0_to_fp32_half of each byte — 2^(e-128), bits (e-1) << 23 for
+// e >= 2 and the denormal 0x00200000 << e below — built with the four
+// scratch registers t and R13.
+func (e *a64Q5) x8Scales(L x8Layout, lo, hi int, t [4]int) {
+	if !L.e8m0 {
+		e.ldurD(lo, 9, 0)
+		e.fcvtl(lo, lo)
+		e.ldurD(hi, 9, 8)
+		e.fcvtl(hi, hi)
+		return
+	}
+	one, two, den, a := t[0], t[1], t[2], t[3]
+	e.ldurD(lo, 9, 0)
+	e.ushll8h(lo, lo)
+	e.ushll2_4s(hi, lo)
+	e.ushll4s(lo, lo)
+	e.w("\tMOVW\t$1, R13")
+	e.dup4sW(one, 13)
+	e.w("\tMOVW\t$2, R13")
+	e.dup4sW(two, 13)
+	e.w("\tMOVW\t$0x00200000, R13")
+	e.dup4sW(den, 13)
+	for _, v := range []int{lo, hi} {
+		e.sub4s(a, v, one)
+		e.shl4s(a, a, 23)     // (e-1) << 23
+		e.ushl4s(den, den, v) // 0x00200000 << e (only meaningful for e < 2)
+		e.cmhs4s(v, v, two)   // mask: e >= 2
+		e.bsl16(v, a, den)    // normal where the mask is set, denormal below
+		if v == lo {
+			e.w("\tMOVW\t$0x00200000, R13")
+			e.dup4sW(den, 13)
+		}
+	}
+}
 
 // a64Q5 adds the encodings the Q5_0 repack bodies need on top of a64Q.
 type a64Q5 struct{ *a64Q }
@@ -149,6 +202,16 @@ func a64GemvQ4_0_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
 	return a64GemvX8Kernel(sym, pool, wide, q4_0x8L)
 }
 
+// a64GemvMXFP4_8x8Kernel / a64GemmMXFP4_8x8Kernel: the iq4_nl x8 bodies
+// with the fp4 table and E8M0 column scales (ggml_gemv/gemm_mxfp4_8x8_q8_0).
+func a64GemvMXFP4_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
+	return a64GemvX8Kernel(sym, pool, wide, mxfp4x8L)
+}
+
+func a64GemmMXFP4_8x8Kernel(sym string, pool *ConstPool, wide bool) string {
+	return a64GemmX8Kernel(sym, pool, wide, mxfp4x8L)
+}
+
 func a64GemvX8Kernel(sym string, pool *ConstPool, wide bool, L x8Layout) string {
 	var sb strings.Builder
 	e := &a64Q5{newA64Q(&sb)}
@@ -188,7 +251,7 @@ func a64GemvX8Kernel(sym string, pool *ConstPool, wide bool, L x8Layout) string 
 	e.loadConsts(cSym)
 	if L.lut {
 		w("\tMOVD\t$·%s(SB), R12", cSym)
-		e.ldurQ(25, 12, q5x8LUTOff)
+		e.ldurQ(25, 12, L.lutOff())
 	}
 	w("gv%sgroup:", L.lbl)
 	e.movi4s0(4)
@@ -230,10 +293,7 @@ func a64GemvX8Kernel(sym string, pool *ConstPool, wide bool, L x8Layout) string 
 	}
 	e.scvtf4s(0, 0)
 	e.scvtf4s(1, 1)
-	e.ldurD(15, 9, 0)
-	e.fcvtl(15, 15)
-	e.ldurD(16, 9, 8)
-	e.fcvtl(16, 16)
+	e.x8Scales(L, 15, 16, [4]int{20, 21, 22, 23})
 	e.ldurH(17, 10, 0)
 	e.fcvtSH(17, 17)
 	e.fmulLane(15, 15, 17, 0)
@@ -356,7 +416,7 @@ func a64GemmX8Kernel(sym string, pool *ConstPool, wide bool, L x8Layout) string 
 	w("gm%sblk:", L.lbl)
 	if L.lut {
 		w("\tMOVD\t$·%s(SB), R12", cSym)
-		e.ldurQ(25, 12, q5x8LUTOff) // (the epilogue reuses v25)
+		e.ldurQ(25, 12, L.lutOff()) // (the epilogue reuses v25)
 	}
 	// the block's eight activation runs: v12+2k rows 0/1, v13+2k rows 2/3
 	for k := 0; k < 4; k++ {
@@ -395,10 +455,7 @@ func a64GemmX8Kernel(sym string, pool *ConstPool, wide bool, L x8Layout) string 
 		}
 	}
 	// scales: v8 = d cols 0..3, v9 = cols 4..7, v10 = activation d rows 0..3
-	e.ldurD(8, 9, 0)
-	e.fcvtl(8, 8)
-	e.ldurD(9, 9, 8)
-	e.fcvtl(9, 9)
+	e.x8Scales(L, 8, 9, [4]int{24, 25, 26, 27})
 	e.ldurD(10, 10, 0)
 	e.fcvtl(10, 10)
 	e.dup2d(11, 10, 0) // [a0 a1 a0 a1]

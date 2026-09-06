@@ -658,6 +658,452 @@
       ]
     },
     {
+      "export": "dbg_gemv_mxfp4_8x8",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_gemv_mxfp4_8x8_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_gemv_mxfp4_8x8_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_gemm_mxfp4_8x8",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "i8mm",
+          "frame": 144,
+          "file": "dbg_gemm_mxfp4_8x8_arm64_i8mm.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 176,
+          "file": "dbg_gemm_mxfp4_8x8_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_mxfp4_q8_0",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_mxfp4_q8_0_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_mxfp4_q8_0_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_iq4_xs_q8_K",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq4_xs_q8_K_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq4_xs_q8_K_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_iq3_xxs_q8_K",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq3_xxs_q8_K_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq3_xxs_q8_K_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_iq3_s_q8_K",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq3_s_q8_K_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq3_s_q8_K_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_iq2_xxs_q8_K",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq2_xxs_q8_K_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq2_xxs_q8_K_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_iq2_xs_q8_K",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq2_xs_q8_K_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq2_xs_q8_K_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_iq2_s_q8_K",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq2_s_q8_K_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq2_s_q8_K_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_iq1_s_q8_K",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq1_s_q8_K_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq1_s_q8_K_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_iq1_m_q8_K",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq1_m_q8_K_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_iq1_m_q8_K_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_tq1_0_q8_K",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_tq1_0_q8_K_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_tq1_0_q8_K_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_tq2_0_q8_K",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_tq2_0_q8_K_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_tq2_0_q8_K_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_nvfp4_q8_0",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_nvfp4_q8_0_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_nvfp4_q8_0_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_q1_0_q8_0",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_q1_0_q8_0_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_q1_0_q8_0_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_dot_q2_0_q8_0",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i64",
+        "i32"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "dotprod",
+          "frame": 16,
+          "file": "dbg_vec_dot_q2_0_q8_0_arm64_dotprod.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_dot_q2_0_q8_0_amd64_avx2.s"
+        }
+      ]
+    },
+    {
       "export": "dbg_vec_dot_q4_0_q8_0",
       "params": [
         "i32",

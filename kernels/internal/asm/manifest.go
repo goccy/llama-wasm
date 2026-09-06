@@ -351,6 +351,166 @@ func Overrides() *Manifest {
 				},
 			},
 			{
+				Export: "dbg_gemv_mxfp4_8x8",
+				Role:   RoleGemv,
+				Quant:  "mxfp4",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i32", "i32"},
+				Bodies: []Body{
+					body("dbg_gemv_mxfp4_8x8", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64GemvMXFP4_8x8Kernel(sym, p, wide) }),
+					body("dbg_gemv_mxfp4_8x8", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64GemvMXFP4_8x8Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_gemm_mxfp4_8x8",
+				Role:   RoleGemm,
+				Quant:  "mxfp4",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i32", "i32"},
+				Bodies: []Body{
+					body("dbg_gemm_mxfp4_8x8", "arm64", "i8mm", a64GemmQ5Frame, func(sym string, p *ConstPool) string { return a64GemmMXFP4_8x8Kernel(sym, p, wide) }),
+					body("dbg_gemm_mxfp4_8x8", "amd64", "avx2", x64GemmQ5Frame, func(sym string, p *ConstPool) string { return x64GemmMXFP4_8x8Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_mxfp4_q8_0",
+				Role:   RoleVecDot,
+				Quant:  "mxfp4",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_mxfp4_q8_0", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotMXFP4Kernel(sym, p, wide) }),
+					body("dbg_vec_dot_mxfp4_q8_0", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotMXFP4Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_iq4_xs_q8_K",
+				Role:   RoleVecDot,
+				Quant:  "iq4_xs",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_iq4_xs_q8_K", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotIQ4XSKernel(sym, p, wide) }),
+					body("dbg_vec_dot_iq4_xs_q8_K", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotIQ4XSKernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_iq3_xxs_q8_K",
+				Role:   RoleVecDot,
+				Quant:  "iq3_xxs",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_iq3_xxs_q8_K", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotIQ3XXSKernel(sym, p, wide) }),
+					body("dbg_vec_dot_iq3_xxs_q8_K", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotIQ3XXSKernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_iq3_s_q8_K",
+				Role:   RoleVecDot,
+				Quant:  "iq3_s",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_iq3_s_q8_K", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotIQ3SKernel(sym, p, wide) }),
+					body("dbg_vec_dot_iq3_s_q8_K", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotIQ3SKernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_iq2_xxs_q8_K",
+				Role:   RoleVecDot,
+				Quant:  "iq2_xxs",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_iq2_xxs_q8_K", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotIQ2XXSKernel(sym, p, wide) }),
+					body("dbg_vec_dot_iq2_xxs_q8_K", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotIQ2XXSKernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_iq2_xs_q8_K",
+				Role:   RoleVecDot,
+				Quant:  "iq2_xs",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_iq2_xs_q8_K", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotIQ2XSKernel(sym, p, wide) }),
+					body("dbg_vec_dot_iq2_xs_q8_K", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotIQ2XSKernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_iq2_s_q8_K",
+				Role:   RoleVecDot,
+				Quant:  "iq2_s",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_iq2_s_q8_K", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotIQ2SKernel(sym, p, wide) }),
+					body("dbg_vec_dot_iq2_s_q8_K", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotIQ2SKernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_iq1_s_q8_K",
+				Role:   RoleVecDot,
+				Quant:  "iq1_s",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_iq1_s_q8_K", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotIQ1SKernel(sym, p, wide) }),
+					body("dbg_vec_dot_iq1_s_q8_K", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotIQ1SKernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_iq1_m_q8_K",
+				Role:   RoleVecDot,
+				Quant:  "iq1_m",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_iq1_m_q8_K", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotIQ1MKernel(sym, p, wide) }),
+					body("dbg_vec_dot_iq1_m_q8_K", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotIQ1MKernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_tq1_0_q8_K",
+				Role:   RoleVecDot,
+				Quant:  "tq1_0",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_tq1_0_q8_K", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotTQ1_0Kernel(sym, p, wide) }),
+					body("dbg_vec_dot_tq1_0_q8_K", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotTQ1_0Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_tq2_0_q8_K",
+				Role:   RoleVecDot,
+				Quant:  "tq2_0",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_tq2_0_q8_K", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotTQ2_0Kernel(sym, p, wide) }),
+					body("dbg_vec_dot_tq2_0_q8_K", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotTQ2_0Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_nvfp4_q8_0",
+				Role:   RoleVecDot,
+				Quant:  "nvfp4",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_nvfp4_q8_0", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotNVFP4Kernel(sym, p, wide) }),
+					body("dbg_vec_dot_nvfp4_q8_0", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotNVFP4Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_q1_0_q8_0",
+				Role:   RoleVecDot,
+				Quant:  "q1_0",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_q1_0_q8_0", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotQ1_0Kernel(sym, p, wide) }),
+					body("dbg_vec_dot_q1_0_q8_0", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotQ1_0Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_dot_q2_0_q8_0",
+				Role:   RoleVecDot,
+				Quant:  "q2_0",
+				Params: []string{"i32", "i64", "i64", "i64", "i64", "i64", "i64", "i32"},
+				Bodies: []Body{
+					body("dbg_vec_dot_q2_0_q8_0", "arm64", "dotprod", 16, func(sym string, p *ConstPool) string { return a64VecDotQ2_0Kernel(sym, p, wide) }),
+					body("dbg_vec_dot_q2_0_q8_0", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecDotQ2_0Kernel(sym, p, wide) }),
+				},
+			},
+			{
 				Export: "dbg_vec_dot_q4_0_q8_0",
 				Role:   RoleVecDot,
 				Quant:  "q4_0",

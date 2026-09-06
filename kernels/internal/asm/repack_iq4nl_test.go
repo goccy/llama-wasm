@@ -38,11 +38,11 @@ func TestIQ4NL8x8KernelShape(t *testing.T) {
 		}
 	}
 	c := q5x8Consts()
-	if len(c) != 64 || int8(c[48]) != -127 || int8(c[63]) != 113 {
+	if len(c) != 80 || int8(c[48]) != -127 || int8(c[63]) != 113 || int8(c[64+7]) != 12 || int8(c[79]) != -12 {
 		t.Errorf("q5x8 const blob: kvalues table")
 	}
 	xc := x64Q5Consts()
-	if len(xc) != 320 || int8(xc[256]) != -127 || int8(xc[256+15]) != 113 || int8(xc[256+16]) != -127 || xc[288] != 0x88 {
+	if len(xc) != 416 || int8(xc[256]) != -127 || int8(xc[256+15]) != 113 || int8(xc[256+16]) != -127 || xc[288] != 0x88 || int8(xc[320+7]) != 12 || xc[352] != 1 || xc[384+2] != 0x20 {
 		t.Errorf("x64 q5 const blob: signed kvalues table")
 	}
 }
