@@ -129,6 +129,7 @@
       "llama_ctx_score",
       "llama_ctx_score_choices",
       "llama_ctx_slots_status",
+    "llama_ctx_slots_system_prompt",
       "llama_ctx_slots_cancel",
       "llama_ctx_slots_update",
       "llama_ctx_slots_post",

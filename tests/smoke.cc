@@ -306,6 +306,56 @@ int main(int argc, char **argv) {
         check(json_ok(llama_ctx_generate(sctx, text, (uint32_t) strlen(text), params, (uint32_t) strlen(params), nullptr)),
               "generate runs again once the slots are idle");
 
+        // System prompt: tasks whose prompt starts with it reuse its cells
+        // and must still produce the text generated alone from the full
+        // prompt, reporting the reuse in n_cached.
+        {
+            llama_ctx_reset(sctx);
+            const char *sys = "Once upon a time";
+            const std::string sp = llama_ctx_slots_system_prompt(sctx, sys, (uint32_t) strlen(sys));
+            int n_sys = 0;
+            check(json_ok(sp) && json_field_int(sp, "n_tokens", n_sys) && n_sys > 1, "slots_system_prompt");
+            const char *tails[2] = {" there was", ", in a"};
+            std::string alone2[2];
+            for (int i = 0; i < 2; i++) {
+                const std::string full = std::string(sys) + tails[i];
+                const std::string g = llama_ctx_generate(sctx, full.c_str(), (uint32_t) full.size(), params, (uint32_t) strlen(params), nullptr);
+                check(json_ok(g) && json_field_b64(g, alone2[i]), "system prompt: generate alone");
+            }
+            int sid[2] = {0, 0};
+            for (int i = 0; i < 2; i++) {
+                const std::string full = std::string(sys) + tails[i];
+                const std::string task = "{\"prompt\":" + std::string("\"") + full + "\",\"n_predict\":16,\"temperature\":0}";
+                const std::string r = llama_ctx_slots_post(sctx, task.c_str(), (uint32_t) task.size());
+                check(json_ok(r) && json_field_int(r, "id", sid[i]), "system prompt: post");
+            }
+            std::string got2[2];
+            int cached[2] = {0, 0};
+            bool done2[2] = {false, false};
+            for (int r = 0; r < 64 && !(done2[0] && done2[1]); r++) {
+                const std::string u = llama_ctx_slots_update(sctx);
+                check(json_ok(u), "system prompt: update");
+                for (const std::string &ev : json_events(u)) {
+                    int id = 0;
+                    if (!json_field_int(ev, "id", id) || ev.find("\"final\":") == std::string::npos) continue;
+                    const int k = id == sid[0] ? 0 : id == sid[1] ? 1 : -1;
+                    if (k < 0) { check(false, "system prompt: unexpected task id"); continue; }
+                    json_field_b64(ev, got2[k]);
+                    json_field_int(ev, "n_cached", cached[k]);
+                    done2[k] = true;
+                }
+            }
+            for (int i = 0; i < 2; i++) {
+                check(done2[i], "system prompt: task finished");
+                check(got2[i] == alone2[i], "system prompt: reused prefix reproduces the text generated alone");
+                check(cached[i] == n_sys - 1 || cached[i] == n_sys, "system prompt: n_cached reports the reuse");
+            }
+            const std::string ss = llama_ctx_slots_status(sctx);
+            check(ss.find("\"n_slots\":3") != std::string::npos, "system prompt occupies one sequence");
+            check(json_ok(llama_ctx_slots_system_prompt(sctx, "", 0)), "system prompt cleared");
+            check(llama_ctx_slots_status(sctx).find("\"n_slots\":4") != std::string::npos, "system prompt sequence released");
+        }
+
         // Cancel: a queued task disappears; a busy one returns its final.
         llama_ctx_reset(sctx);
         const char *ltask = "{\"prompt\":\"Once upon a time\",\"n_predict\":64,\"temperature\":0}";

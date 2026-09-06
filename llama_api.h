@@ -285,8 +285,21 @@ std::string llama_ctx_slots_update(uint64_t ctx);
  * included. An unknown id is an error. */
 std::string llama_ctx_slots_cancel(uint64_t ctx, int32_t id);
 
+/* The system prompt shared by every task, after llama.cpp's server of old:
+ * decoded once into the last sequence, which it then occupies (one slot
+ * fewer for tasks), and copied into a task's sequence (llama_memory_seq_cp
+ * — metadata with kv_unified, a cell copy otherwise) whenever the task's
+ * prompt starts with the same tokens, so only the rest is decoded; the
+ * final's n_cached counts the reused tokens. Tokenized with
+ * add_special=true, so a task prompt should be the system prompt text
+ * followed by the rest. Refused while slots hold tasks; an empty text
+ * clears it and frees the sequence. Returns `{"ok":true,"n_tokens":N}`. */
+std::string llama_ctx_slots_system_prompt(uint64_t ctx, const char *text,
+                                          uint32_t text_len);
+
 /* `{"ok":true,"n_slots":N,"active":N,"queued":N,"n_ctx":N,"used":N}` —
- * used is the cache cells the busy slots hold. */
+ * n_slots excludes the sequence a system prompt occupies; used is the
+ * cache cells the busy slots hold. */
 std::string llama_ctx_slots_status(uint64_t ctx);
 
 /* -------------------------------------------------------------------- lora */
