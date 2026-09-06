@@ -45,10 +45,15 @@ fi
 # `git apply --numstat` reports without applying anything; a change outside
 # those paths is someone's work in progress and is left alone with an error
 # rather than reset or half-patched.
+# In CI the build runs as root in a container over a checkout owned by the
+# runner user, which git refuses to read ("dubious ownership") unless the
+# directory is marked safe; the mark is passed per command rather than
+# written into anyone's global config.
+lgit() { git -c "safe.directory=$HERE/llama.cpp" -C "$HERE/llama.cpp" "$@"; }
 series=("$HERE"/patches/*.patch)
 if [ -e "${series[0]}" ]; then
-  touched=$(git -C "$HERE/llama.cpp" apply --numstat "${series[@]}" | cut -f3 | sort -u)
-  dirty=$(git -C "$HERE/llama.cpp" status --porcelain --untracked-files=all | cut -c4- | sort -u)
+  touched=$(lgit apply --numstat "${series[@]}" | cut -f3 | sort -u)
+  dirty=$(lgit status --porcelain --untracked-files=all | cut -c4- | sort -u)
   if [ -n "$dirty" ]; then
     foreign=$(comm -23 <(printf '%s\n' "$dirty") <(printf '%s\n' "$touched"))
     if [ -n "$foreign" ]; then
@@ -58,8 +63,8 @@ if [ -e "${series[0]}" ]; then
     fi
     while IFS= read -r path; do
       [ -n "$path" ] || continue
-      if git -C "$HERE/llama.cpp" ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
-        git -C "$HERE/llama.cpp" checkout -q -- "$path"
+      if lgit ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+        lgit checkout -q -- "$path"
       else
         rm -f "$HERE/llama.cpp/$path"
       fi
@@ -67,7 +72,7 @@ if [ -e "${series[0]}" ]; then
     echo "== reset $(printf '%s\n' "$dirty" | wc -l | tr -d ' ') patched path(s) to the pinned llama.cpp"
   fi
   for p in "${series[@]}"; do
-    git -C "$HERE/llama.cpp" apply "$p"
+    lgit apply "$p"
     echo "== applied patch: $(basename "$p")"
   done
 fi
