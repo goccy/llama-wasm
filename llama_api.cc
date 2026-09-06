@@ -339,6 +339,17 @@ bool load_progress_cb(float progress, void * /*user_data*/) {
 
 } // namespace
 
+/* ------------------------------------------------------------ test hooks */
+
+// dbg_kernel_init is a raw wasm export for the kernel differential harness
+// (kernels/internal/asm, scripts/kernel-diff.js): it runs ggml's CPU-side
+// initialisation without loading a model, so the dbg_* kernel exports can be
+// called directly. The f16 -> f32 lookup table those bodies read is filled
+// here; before this call it is all zeros and every dot product is 0.
+extern "C" __attribute__((export_name("dbg_kernel_init"))) void dbg_kernel_init() {
+    ggml_cpu_init();
+}
+
 /* ---------------------------------------------------------------- backend */
 
 void llama_wasm_init() {

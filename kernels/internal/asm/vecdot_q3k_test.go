@@ -93,7 +93,7 @@ func TestA64VecDotQ3KKernelGate(t *testing.T) {
 	_, argBytes := vecDotArgs(true)
 	asm := wrap("arm64", "Q3KKernel", 16, argBytes, "dotprod", a64VecDotQ3_KKernel("Q3KKernel", nil, true))
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+kQuantRunSrc+q3KRunSrc+q3KDecls, q3KRunTest)
+	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+kQuantRunSrc+q3KRunSrc+q3KDecls, q3KRunTest, "Q3KKernel", "dbg_vec_dot_q3_K_q8_K")
 	runArm64Gate(t, dir, ".", "TestQ3K", asm)
 }
 
@@ -102,6 +102,6 @@ func TestX64VecDotQ3KKernelGate(t *testing.T) {
 	pool := NewConstPool("q3kx_")
 	asm := wrap("amd64", "Q3KKernel", 16, argBytes, "avx2", x64VecDotQ3_KKernel("Q3KKernel", pool, true)+"\n"+pool.Emit())
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+kQuantRunSrc+q3KRunSrc+q3KDecls, q3KRunTest)
+	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+kQuantRunSrc+q3KRunSrc+q3KDecls, q3KRunTest, "Q3KKernel", "dbg_vec_dot_q3_K_q8_K")
 	runAmd64Gate(t, dir, ".", "TestQ3K", asm)
 }

@@ -108,7 +108,10 @@ func runDot(t *testing.T, kernel func(m *mockModule, l0 int32, l1, l2, l3, l4, l
 	put32(mem, sOff, 12345)
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	before := append([]byte(nil), mem...)
 	kernel(m, int32(n), int64(sOff), 0, int64(xOff), 0, int64(yOff), 0, 1)
+	refCheck(t, kernel, before, mem, []refArg{rI32(int32(n)), rPtr(int64(sOff)), rI64(0), rPtr(int64(xOff)), rI64(0), rPtr(int64(yOff)), rI64(0), rI32(1)},
+		nil, []refOut{outF32(sOff, 4)}, refTolF32)
 	var want float64
 	for i := range x {
 		want += f16val(x[i]) * f16val(y[i])
@@ -131,7 +134,10 @@ func runMad(t *testing.T, kernel func(m *mockModule, l0 int32, l1, l2 int64, l3 
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
 	const v = float32(-0.8125)
+	before := append([]byte(nil), mem...)
 	kernel(m, int32(n), int64(yOff), int64(xOff), v)
+	refCheck(t, kernel, before, mem, []refArg{rI32(int32(n)), rPtr(int64(yOff)), rPtr(int64(xOff)), rF32(v)},
+		nil, []refOut{outF32(yOff, 4*n)}, refTolF32)
 	for i := range x {
 		want := f16val(y0[i]) + float64(v)*f16val(x[i])
 		if got := get32(mem, yOff+4*i); !close32(got, want, 1e-6) {
@@ -166,7 +172,7 @@ func TestA64VecF16KernelGate(t *testing.T) {
 	asm := wrap("arm64", "DotKernel", 16, dotBytes, "neon", a64VecDotF16Kernel("DotKernel", nil, true)) +
 		wrap("arm64", "MadKernel", 16, madBytes, "neon", a64VecMadF16F32Kernel("MadKernel", nil, true))
 	dir := t.TempDir()
-	writeRunTree(t, dir, "f16run", "arm64", asm, vecF16RunSrc+vecF16Decls, vecF16RunTest)
+	writeRunTree(t, dir, "f16run", "arm64", asm, vecF16RunSrc+vecF16Decls, vecF16RunTest, "DotKernel", "dbg_vec_dot_f16", "MadKernel", "dbg_vec_mad_f16_f32")
 	runArm64Gate(t, dir, ".", "TestVecF16", asm)
 }
 
@@ -176,6 +182,6 @@ func TestX64VecF16KernelGate(t *testing.T) {
 	asm := wrap("amd64", "DotKernel", 16, dotBytes, "avx2", x64VecDotF16Kernel("DotKernel", nil, true)) +
 		wrap("amd64", "MadKernel", 16, madBytes, "avx2", x64VecMadF16F32Kernel("MadKernel", nil, true))
 	dir := t.TempDir()
-	writeRunTree(t, dir, "f16run", "amd64", asm, vecF16RunSrc+vecF16Decls, vecF16RunTest)
+	writeRunTree(t, dir, "f16run", "amd64", asm, vecF16RunSrc+vecF16Decls, vecF16RunTest, "DotKernel", "dbg_vec_dot_f16", "MadKernel", "dbg_vec_mad_f16_f32")
 	runAmd64Gate(t, dir, ".", "TestVecF16", asm)
 }

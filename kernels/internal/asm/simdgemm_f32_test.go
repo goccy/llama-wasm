@@ -95,7 +95,10 @@ func runCase(t *testing.T, kernel func(m *mockModule, l0, l1, l2 int64, l3, l4, 
 	}
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	before := append([]byte(nil), mem...)
 	kernel(m, int64(cOff), int64(aOff), int64(bOff), int32(c.m), int32(c.k), int32(c.n))
+	refCheck(t, kernel, before, mem, []refArg{rPtr(int64(cOff)), rPtr(int64(aOff)), rPtr(int64(bOff)), rI32(int32(c.m)), rI32(int32(c.k)), rI32(int32(c.n))},
+		nil, []refOut{outF32(cOff, 4*c.m*c.n)}, refTolF32)
 	for i := 0; i < c.m; i++ {
 		for j := 0; j < c.n; j++ {
 			acc := float64(C[i*c.n+j])
@@ -134,7 +137,7 @@ func TestSimdGemmA64(t *testing.T) {
 		runCase(t, GemmKernel, c)
 	}
 }
-`)
+`, "GemmKernel", "dbg_simd_gemm_f32")
 	runArm64Gate(t, dir, ".", "TestSimdGemmA64", kernel)
 }
 
@@ -155,6 +158,6 @@ func TestSimdGemmX64(t *testing.T) {
 		runCase(t, GemmKernel, c)
 	}
 }
-`)
+`, "GemmKernel", "dbg_simd_gemm_f32")
 	runAmd64Gate(t, dir, ".", "TestSimdGemmX64", kernel)
 }

@@ -78,7 +78,7 @@ func TestA64VecDotQ2KKernelGate(t *testing.T) {
 	_, argBytes := vecDotArgs(true)
 	asm := wrap("arm64", "Q2KKernel", 16, argBytes, "dotprod", a64VecDotQ2_KKernel("Q2KKernel", nil, true))
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+kQuantRunSrc+q2KRunSrc+q2KDecls, q2KRunTest)
+	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+kQuantRunSrc+q2KRunSrc+q2KDecls, q2KRunTest, "Q2KKernel", "dbg_vec_dot_q2_K_q8_K")
 	runArm64Gate(t, dir, ".", "TestQ2K", asm)
 }
 
@@ -87,6 +87,6 @@ func TestX64VecDotQ2KKernelGate(t *testing.T) {
 	pool := NewConstPool("q2kx_")
 	asm := wrap("amd64", "Q2KKernel", 16, argBytes, "avx2", x64VecDotQ2_KKernel("Q2KKernel", pool, true)+"\n"+pool.Emit())
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+kQuantRunSrc+q2KRunSrc+q2KDecls, q2KRunTest)
+	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+kQuantRunSrc+q2KRunSrc+q2KDecls, q2KRunTest, "Q2KKernel", "dbg_vec_dot_q2_K_q8_K")
 	runAmd64Gate(t, dir, ".", "TestQ2K", asm)
 }

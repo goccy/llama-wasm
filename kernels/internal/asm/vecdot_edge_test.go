@@ -132,6 +132,6 @@ func TestA64VecDotKQuantEdgeGate(t *testing.T) {
 	asm := wrap("arm64", "Q4KKernel", 16, argBytes, "dotprod", a64VecDotQ4_KKernel("Q4KKernel", nil, true)) +
 		wrap("arm64", "Q6KKernel", 16, argBytes, "dotprod", a64VecDotQ6_KKernel("Q6KKernel", nil, true))
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+kQuantRunSrc+kQuantEdgeRunSrc+kQuantDecls, kQuantEdgeRunTest)
+	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+kQuantRunSrc+kQuantEdgeRunSrc+kQuantDecls, kQuantEdgeRunTest, "Q4KKernel", "dbg_vec_dot_q4_K_q8_K", "Q6KKernel", "dbg_vec_dot_q6_K_q8_K")
 	runArm64Gate(t, dir, ".", "TestKQuantEdges", asm)
 }

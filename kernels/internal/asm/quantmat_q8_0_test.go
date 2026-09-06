@@ -138,7 +138,10 @@ func runQuantMat(t *testing.T, kernel quantKernel, k int, seed uint32, zeroRow i
 	yOff := xOff + 4*k*4 + 64
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	before := append([]byte(nil), mem...)
 	kernel(m, int64(xOff), int64(yOff), int64(k))
+	refCheck(t, kernel, before, mem, []refArg{rPtr(int64(xOff)), rPtr(int64(yOff)), rI64(int64(k))},
+		nil, []refOut{outBytes(yOff, k/32*136)}, 0)
 	want := reference(x, k)
 	for i := range want {
 		if mem[yOff+i] != want[i] {
@@ -180,7 +183,7 @@ func TestA64QuantizeMatQ8_0_4x8KernelGate(t *testing.T) {
 	_, argBytes := quantMatArgs(true)
 	asm := wrap("arm64", "QuantKernel", 16, argBytes, "neon", a64QuantizeMatQ8_0_4x8Kernel("QuantKernel", true))
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantmatrun", "arm64", asm, quantMatQ8RunSrc+quantMatQ8Decls, quantMatQ8RunTest)
+	writeRunTree(t, dir, "quantmatrun", "arm64", asm, quantMatQ8RunSrc+quantMatQ8Decls, quantMatQ8RunTest, "QuantKernel", "dbg_quantize_mat_q8_0_4x8")
 	runArm64Gate(t, dir, ".", "TestQuantMat", asm)
 }
 
@@ -189,6 +192,6 @@ func TestX64QuantizeMatQ8_0_4x8KernelGate(t *testing.T) {
 	pool := NewConstPool("q8m_")
 	asm := wrap("amd64", "QuantKernel", 16, argBytes, "avx2", x64QuantizeMatQ8_0_4x8Kernel("QuantKernel", pool, true)+"\n"+pool.Emit())
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantmatrun", "amd64", asm, quantMatQ8RunSrc+quantMatQ8Decls, quantMatQ8RunTest)
+	writeRunTree(t, dir, "quantmatrun", "amd64", asm, quantMatQ8RunSrc+quantMatQ8Decls, quantMatQ8RunTest, "QuantKernel", "dbg_quantize_mat_q8_0_4x8")
 	runAmd64Gate(t, dir, ".", "TestQuantMat", asm)
 }

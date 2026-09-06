@@ -104,7 +104,12 @@ func runSoftMax(t *testing.T, kernel func(m *mockModule, l0 int32, l1, l2 int64,
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
 	const max = float32(3.25)
+	before := append([]byte(nil), mem...)
 	sum := kernel(m, int32(n), int64(yOff), int64(xOff), max)
+	if res := refCheck(t, kernel, before, mem, []refArg{rI32(int32(n)), rPtr(int64(yOff)), rPtr(int64(xOff)), rF32(max)},
+		nil, []refOut{outF32(yOff, 4*n)}, refTolExp); res.has && math.Abs(res.f64-sum) > refTolExp*math.Max(1, math.Abs(sum)) {
+		t.Fatalf("n=%d soft_max sum: asm %v, C body %v", n, sum, res.f64)
+	}
 	var want float64
 	for i, v := range x {
 		w := math.Exp(float64(v) - float64(max))
@@ -149,7 +154,10 @@ func runSwiglu(t *testing.T, kernel func(m *mockModule, l0 int32, l1, l2, l3 int
 	}
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	before := append([]byte(nil), mem...)
 	kernel(m, int32(n), int64(yOff), int64(xOff), int64(gOff))
+	refCheck(t, kernel, before, mem, []refArg{rI32(int32(n)), rPtr(int64(yOff)), rPtr(int64(xOff)), rPtr(int64(gOff))},
+		nil, []refOut{outF32(yOff, 4*n)}, refTolExp)
 	for i := range x {
 		w := float64(x[i]) / (1 + math.Exp(-float64(x[i]))) * float64(g[i])
 		got := getF32(mem, yOff+4*i)
@@ -180,7 +188,7 @@ func TestA64VecExpKernelGate(t *testing.T) {
 	asm := wrap("arm64", "SoftMaxKernel", 16, smBytes, "neon", a64VecSoftMaxKernel("SoftMaxKernel", pool, true)) +
 		wrap("arm64", "SwigluKernel", 16, swBytes, "neon", a64VecSwigluKernel("SwigluKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "exprun", "arm64", asm, vecExpRunSrc+vecExpDecls, vecExpRunTest)
+	writeRunTree(t, dir, "exprun", "arm64", asm, vecExpRunSrc+vecExpDecls, vecExpRunTest, "SoftMaxKernel", "dbg_vec_soft_max_f32", "SwigluKernel", "dbg_vec_swiglu_f32")
 	runArm64Gate(t, dir, ".", "TestVecExp", asm)
 }
 
@@ -190,6 +198,6 @@ func TestX64VecExpKernelGate(t *testing.T) {
 	asm := wrap("amd64", "SoftMaxKernel", 16, smBytes, "avx2", x64VecSoftMaxKernel("SoftMaxKernel", pool, true)) +
 		wrap("amd64", "SwigluKernel", 16, swBytes, "avx2", x64VecSwigluKernel("SwigluKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "exprun", "amd64", asm, vecExpRunSrc+vecExpDecls, vecExpRunTest)
+	writeRunTree(t, dir, "exprun", "amd64", asm, vecExpRunSrc+vecExpDecls, vecExpRunTest, "SoftMaxKernel", "dbg_vec_soft_max_f32", "SwigluKernel", "dbg_vec_swiglu_f32")
 	runAmd64Gate(t, dir, ".", "TestVecExp", asm)
 }

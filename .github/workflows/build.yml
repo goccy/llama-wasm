@@ -67,6 +67,38 @@ jobs:
         working-directory: kernels
         run: go test ./... -count=1
 
+  # The kernel differential gate: every assembly override body against the
+  # C body it replaces, the dbg_* export of the llama.wasm the build job just
+  # produced (compiled from the pinned llama.cpp commit). Same command as
+  # `make verify-kernels` locally, on both architectures, with
+  # -require-llama-wasm so a missing wasm or an uncompared export fails.
+  # This is what turns a llama.cpp bump that changes a kernel's layout or
+  # arithmetic into a red check instead of stale assembly on new data. Node
+  # runs the wasm (memory64 needs Node 24+).
+  kernel-diff:
+    needs: build
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: kernels/go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: llama-wasm-${{ github.sha }}
+          path: release
+      - name: Kernel gates against the C bodies in llama.wasm
+        working-directory: kernels
+        run: |
+          go test ./internal/asm -count=1 -run 'Gate$' \
+            -args -require-llama-wasm -llama-wasm "$GITHUB_WORKSPACE/release/llama.wasm"
+
   build:
     runs-on: ubuntu-latest
     steps:

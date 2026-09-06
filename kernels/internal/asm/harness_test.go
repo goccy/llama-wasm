@@ -45,21 +45,38 @@ func trapstub(arch string) string {
 }
 
 // writeRunTree lays out a temporary Go test package: the assembled
-// kernels, the run sources and the run test.
-func writeRunTree(t *testing.T, dir, module, arch, kernelAsm, runSrc, runTest string) {
+// kernels, the run sources, the run test, and the wasm replay client
+// (wasmref_test.go). bindings are (kernel symbol, dbg_ export) pairs naming
+// the C body each kernel symbol in the tree replaces; a run tree that calls
+// refCheck on an unbound symbol fails.
+func writeRunTree(t *testing.T, dir, module, arch, kernelAsm, runSrc, runTest string, bindings ...string) {
 	t.Helper()
+	pkg := runPackage(t, runSrc)
 	files := map[string]string{
 		"go.mod": "module " + module + "\n\ngo 1.25.0\n",
 		"kernel_" + arch + ".s": "//go:build " + arch + "\n\n#include \"textflag.h\"\n#include \"funcdata.h\"\n\n" +
 			kernelAsm + trapstub(arch),
 		"run.go":      runSrc,
 		"run_test.go": runTest,
+		"ref.go":      refSource(t, pkg, dir, bindings),
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
+}
+
+// runPackage reads the package clause of a run source.
+func runPackage(t *testing.T, src string) string {
+	t.Helper()
+	for _, line := range strings.Split(src, "\n") {
+		if name, ok := strings.CutPrefix(strings.TrimSpace(line), "package "); ok {
+			return strings.TrimSpace(name)
+		}
+	}
+	t.Fatal("run source has no package clause")
+	return ""
 }
 
 // runArm64Gate assembles and links the tree for arm64 on every host and
@@ -78,10 +95,12 @@ func runArm64Gate(t *testing.T, dir, pkg, runName, diag string) {
 	}
 	cmd := exec.Command(bin, "-test.run", runName, "-test.v")
 	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("arm64 execution failed: %v\n%s\n--- asm ---\n%s", err, out, diag)
 	}
-	t.Logf("arm64 execution:")
+	collectCompared(dir)
+	t.Logf("arm64 execution:\n%s", out)
 }
 
 // runAmd64Gate assembles and links the tree for amd64 on every host and
@@ -107,9 +126,12 @@ func runAmd64Gate(t *testing.T, dir, pkg, runName, diag string) {
 	}
 	cmd := exec.Command(bin, "-test.run", runName, "-test.v")
 	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("amd64 execution failed: %v\n%s", err, out)
 	}
+	collectCompared(dir)
+	t.Logf("amd64 execution:\n%s", out)
 }
 
 func hostHasAVX2(t *testing.T) bool {

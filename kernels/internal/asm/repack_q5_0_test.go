@@ -136,14 +136,20 @@ func runX8Exact(t *testing.T, name string, gemv, gemm q5Kernel, n, nc int, seed 
 	copy(mem[yOff:], vy)
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	before := append([]byte(nil), mem...)
 	gemm(m, int32(n), int64(sOff), int64(bs), int64(xOff), int64(yOff), 4, int32(nc))
+	refCheck(t, gemm, before, mem, []refArg{rI32(int32(n)), rPtr(int64(sOff)), rI64(int64(bs)), rPtr(int64(xOff)), rPtr(int64(yOff)), rI32(4), rI32(int32(nc))},
+		nil, []refOut{outF32(sOff, 4*(3*bs+nc))}, refTolGemm)
 	for r := 0; r < 4; r++ {
 		vmem := make([]byte, yOff+len(four[r])+256)
 		copy(vmem[xOff:], vx)
 		copy(vmem[yOff:], four[r])
 		vsize := uint64(len(vmem))
 		vm := &mockModule{memSizePtr: &vsize, mem: unsafe.Pointer(&vmem[0])}
+		vbefore := append([]byte(nil), vmem...)
 		gemv(vm, int32(n), int64(sOff), int64(nc), int64(xOff), int64(yOff), 1, int32(nc))
+		refCheck(t, gemv, vbefore, vmem, []refArg{rI32(int32(n)), rPtr(int64(sOff)), rI64(int64(nc)), rPtr(int64(xOff)), rPtr(int64(yOff)), rI32(1), rI32(int32(nc))},
+			nil, []refOut{outF32(sOff, 4*nc)}, refTolGemm)
 		for c := 0; c < nc; c++ {
 			g, v := get32(mem, sOff+4*(r*bs+c)), get32(vmem, sOff+4*c)
 			if g != v {
@@ -209,7 +215,10 @@ func runGemvQ5(t *testing.T, kernel q5Kernel, n, nc int, seed uint32) {
 	copy(mem[yOff:], y)
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	before := append([]byte(nil), mem...)
 	kernel(m, int32(n), int64(sOff), int64(nc), int64(xOff), int64(yOff), 1, int32(nc))
+	refCheck(t, kernel, before, mem, []refArg{rI32(int32(n)), rPtr(int64(sOff)), rI64(int64(nc)), rPtr(int64(xOff)), rPtr(int64(yOff)), rI32(1), rI32(int32(nc))},
+		nil, []refOut{outF32(sOff, 4*nc)}, refTolGemm)
 	for c := 0; c < nc; c++ {
 		want, mag := dotRows(rows[c], yv)
 		if got := get32(mem, sOff+4*c); !closeQ5(got, want, mag) {
@@ -257,7 +266,10 @@ func runGemmQ5(t *testing.T, kernel q5Kernel, n, nr, nc int, seed uint32) {
 	copy(mem[yOff:], vy)
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	before := append([]byte(nil), mem...)
 	kernel(m, int32(n), int64(sOff), int64(bs), int64(xOff), int64(yOff), int32(nr), int32(nc))
+	refCheck(t, kernel, before, mem, []refArg{rI32(int32(n)), rPtr(int64(sOff)), rI64(int64(bs)), rPtr(int64(xOff)), rPtr(int64(yOff)), rI32(int32(nr)), rI32(int32(nc))},
+		nil, []refOut{outF32(sOff, 4*((nr-1)*bs+nc))}, refTolGemm)
 	for r := 0; r < nr; r++ {
 		for c := 0; c < nc; c++ {
 			want, mag := dotRows(rows[c], yvs[r])
@@ -317,7 +329,7 @@ func TestA64Q5_0_8x8KernelGate(t *testing.T) {
 	asm := wrap("arm64", "GemvKernel", 16, argBytes, "dotprod", a64GemvQ5_0_8x8Kernel("GemvKernel", pool, true)) +
 		wrap("arm64", "GemmKernel", a64GemmQ5Frame, argBytes, "i8mm", a64GemmQ5_0_8x8Kernel("GemmKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+q5x8RunSrc+q5x8Decls, q5x8RunTest)
+	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+q5x8RunSrc+q5x8Decls, q5x8RunTest, "GemmKernel", "dbg_gemm_q5_0_8x8", "GemvKernel", "dbg_gemv_q5_0_8x8")
 	runArm64Gate(t, dir, ".", "TestGem[vm]Q5|TestExactQ5", asm)
 }
 
@@ -342,6 +354,6 @@ func TestX64Q5_0_8x8KernelGate(t *testing.T) {
 	asm := wrap("amd64", "GemvKernel", 16, argBytes, "avx2", x64GemvQ5_0_8x8Kernel("GemvKernel", pool, true)) +
 		wrap("amd64", "GemmKernel", x64GemmQ5Frame, argBytes, "avx2", x64GemmQ5_0_8x8Kernel("GemmKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+q5x8RunSrc+q5x8Decls, q5x8RunTest)
+	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+q5x8RunSrc+q5x8Decls, q5x8RunTest, "GemmKernel", "dbg_gemm_q5_0_8x8", "GemvKernel", "dbg_gemv_q5_0_8x8")
 	runAmd64Gate(t, dir, ".", "TestGem[vm]Q5|TestExactQ5", asm)
 }

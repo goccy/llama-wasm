@@ -167,7 +167,10 @@ func runOne(t *testing.T, kernel func(m *mockModule, l0 int32, l1, l2, l3, l4 in
 	buildProblem(mem, n, sOff, vxOff, vyOff)
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	before := append([]byte(nil), mem...)
 	kernel(m, int32(n), int64(sOff), int64(bs), int64(vxOff), int64(vyOff), nr, nc)
+	refCheck(t, kernel, before, mem, []refArg{rI32(int32(n)), rPtr(int64(sOff)), rI64(int64(bs)), rPtr(int64(vxOff)), rPtr(int64(vyOff)), rI32(nr), rI32(nc)},
+		nil, []refOut{outF32(sOff, 4*(int(nr-1)*int(bs)+int(nc)))}, refTolGemm)
 	want := reference(mem, n, vxOff, vyOff)
 	for r := 0; r < nr; r++ {
 		for c := 0; c < nc; c++ {
@@ -211,7 +214,7 @@ func TestGemmA64SMMLA(t *testing.T) {
 	runOne(t, GemmKernelSMMLA, 64)
 	runOne(t, GemmKernelSMMLA, 32*300)
 }
-`)
+`, "GemmKernel", "dbg_gemm_q8_0_4x4", "GemmKernelSMMLA", "dbg_gemm_q8_0_4x4")
 	runArm64Gate(t, dir, ".", "TestGemmA64", kernel)
 }
 
@@ -240,7 +243,7 @@ func TestGemmX64VNNI(t *testing.T) {
 	runOne(t, GemmKernelVNNI, 64)
 	runOne(t, GemmKernelVNNI, 32*300)
 }
-`)
+`, "GemmKernel", "dbg_gemm_q8_0_4x4", "GemmKernelVNNI", "dbg_gemm_q8_0_4x4")
 	runName := "TestGemmX64$"
 	if hostHasVNNI(t) {
 		runName = "TestGemmX64"
