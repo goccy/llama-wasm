@@ -98,6 +98,13 @@ func runAmd64Gate(t *testing.T, dir, pkg, runName, diag string) {
 	if runtime.GOARCH != "amd64" || !hostHasAVX2(t) {
 		t.Skipf("assembled+linked OK; skipping execution (GOARCH=%s, avx2=%v)", runtime.GOARCH, hostHasAVX2(t))
 	}
+	if underRosetta() {
+		// Rosetta 2 runs these bodies but not faithfully: its AVX2 emulation
+		// does not saturate VPMADDUBSW's i16 pair sums, so a body that
+		// overflows them passes here and fails on real hardware (CI). An
+		// emulated pass is not evidence; only report the assemble/link.
+		t.Skip("assembled+linked OK; skipping execution under Rosetta 2 (AVX2 emulation is not numerically faithful)")
+	}
 	cmd := exec.Command(bin, "-test.run", runName, "-test.v")
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -125,4 +132,14 @@ func hostHasVNNI(t *testing.T) bool {
 	}
 	data, err := os.ReadFile("/proc/cpuinfo")
 	return err == nil && strings.Contains(string(data), "avx512_vnni")
+}
+
+// underRosetta reports whether this amd64 process is being translated by
+// Rosetta 2 on an Apple Silicon host.
+func underRosetta() bool {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "amd64" {
+		return false
+	}
+	out, err := exec.Command("sysctl", "-n", "sysctl.proc_translated").Output()
+	return err == nil && strings.TrimSpace(string(out)) == "1"
 }
