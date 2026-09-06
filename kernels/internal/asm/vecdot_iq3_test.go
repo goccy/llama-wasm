@@ -214,7 +214,7 @@ func TestA64VecDotIQ3KernelGate(t *testing.T) {
 	asm := wrap("arm64", "I3XKernel", 16, argBytes, "dotprod", a64VecDotIQ3XXSKernel("I3XKernel", pool, true)) +
 		wrap("arm64", "I3SKernel", 16, argBytes, "dotprod", a64VecDotIQ3SKernel("I3SKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+iq3RunSrc+iq3Decls, iq3RunTest)
+	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+iq3RunSrc+iq3Decls, iq3RunTest, "I3SKernel", "dbg_vec_dot_iq3_s_q8_K", "I3XKernel", "dbg_vec_dot_iq3_xxs_q8_K")
 	runArm64Gate(t, dir, ".", "TestIQ3", asm)
 }
 
@@ -224,6 +224,6 @@ func TestX64VecDotIQ3KernelGate(t *testing.T) {
 	asm := wrap("amd64", "I3XKernel", 16, argBytes, "avx2", x64VecDotIQ3XXSKernel("I3XKernel", pool, true)) +
 		wrap("amd64", "I3SKernel", 16, argBytes, "avx2", x64VecDotIQ3SKernel("I3SKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+iq3RunSrc+iq3Decls, iq3RunTest)
+	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+iq3RunSrc+iq3Decls, iq3RunTest, "I3SKernel", "dbg_vec_dot_iq3_s_q8_K", "I3XKernel", "dbg_vec_dot_iq3_xxs_q8_K")
 	runAmd64Gate(t, dir, ".", "TestIQ3", asm)
 }

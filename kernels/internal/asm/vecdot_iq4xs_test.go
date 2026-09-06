@@ -94,7 +94,7 @@ func TestA64VecDotIQ4XSKernelGate(t *testing.T) {
 	pool := NewConstPool("ix_")
 	asm := wrap("arm64", "IXKernel", 16, argBytes, "dotprod", a64VecDotIQ4XSKernel("IXKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+q5x8RunSrc+iq4RunSrc+iq4xsRunSrc+iq4xsDecls, iq4xsRunTest)
+	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+q5x8RunSrc+iq4RunSrc+iq4xsRunSrc+iq4xsDecls, iq4xsRunTest, "IXKernel", "dbg_vec_dot_iq4_xs_q8_K")
 	runArm64Gate(t, dir, ".", "TestIQ4XS", asm)
 }
 
@@ -103,6 +103,6 @@ func TestX64VecDotIQ4XSKernelGate(t *testing.T) {
 	pool := NewConstPool("ixx_")
 	asm := wrap("amd64", "IXKernel", 16, argBytes, "avx2", x64VecDotIQ4XSKernel("IXKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+q5x8RunSrc+iq4RunSrc+iq4xsRunSrc+iq4xsDecls, iq4xsRunTest)
+	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+q5x8RunSrc+iq4RunSrc+iq4xsRunSrc+iq4xsDecls, iq4xsRunTest, "IXKernel", "dbg_vec_dot_iq4_xs_q8_K")
 	runAmd64Gate(t, dir, ".", "TestIQ4XS", asm)
 }

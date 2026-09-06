@@ -89,7 +89,7 @@ func TestA64VecDotMXFP4KernelGate(t *testing.T) {
 	pool := NewConstPool("mx_")
 	asm := wrap("arm64", "MXKernel", 16, argBytes, "dotprod", a64VecDotMXFP4Kernel("MXKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+mxfp4RunSrc+mxfp4Decls, mxfp4RunTest)
+	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+mxfp4RunSrc+mxfp4Decls, mxfp4RunTest, "MXKernel", "dbg_vec_dot_mxfp4_q8_0")
 	runArm64Gate(t, dir, ".", "TestMXFP4", asm)
 }
 
@@ -98,6 +98,6 @@ func TestX64VecDotMXFP4KernelGate(t *testing.T) {
 	pool := NewConstPool("mxx_")
 	asm := wrap("amd64", "MXKernel", 16, argBytes, "avx2", x64VecDotMXFP4Kernel("MXKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+mxfp4RunSrc+mxfp4Decls, mxfp4RunTest)
+	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+mxfp4RunSrc+mxfp4Decls, mxfp4RunTest, "MXKernel", "dbg_vec_dot_mxfp4_q8_0")
 	runAmd64Gate(t, dir, ".", "TestMXFP4", asm)
 }
