@@ -270,6 +270,6 @@ func TestX64VecDotQuantKernelGate(t *testing.T) {
 		asm += wrap("amd64", k.sym, 16, argBytes, "avx2", k.gen(k.sym, pool, true)+"\n"+pool.Emit())
 	}
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+q5_0RunSrc+kQuantRunSrc+x64QuantDecls, x64QuantRunTest, "Q4KKernel", "dbg_vec_dot_q4_K_q8_K", "Q5KKernel", "dbg_vec_dot_q5_K_q8_K", "Q6KKernel", "dbg_vec_dot_q6_K_q8_K")
+	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+q5_0RunSrc+kQuantRunSrc+x64QuantDecls, x64QuantRunTest, "Q4KKernel", "dbg_vec_dot_q4_K_q8_K", "Q5Kernel", "dbg_vec_dot_q5_0_q8_0", "Q6KKernel", "dbg_vec_dot_q6_K_q8_K")
 	runAmd64Gate(t, dir, ".", "TestQuant", asm)
 }
