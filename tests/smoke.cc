@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 static int failures = 0;
 
@@ -76,6 +77,40 @@ static bool json_field_b64(const std::string &js, std::string &out) {
         }
     }
     return true;
+}
+
+// json_field_int returns the integer "key" field of a flat result.
+static bool json_field_int(const std::string &js, const char *key, int &out) {
+    const std::string k = std::string("\"") + key + "\":";
+    const size_t at = js.find(k);
+    if (at == std::string::npos) return false;
+    out = atoi(js.c_str() + at + k.size());
+    return true;
+}
+
+// json_events splits the "events" array of a slots_update result into its
+// objects (top-level braces, string-aware) — the test's own scanner, so a
+// bug in the bridge's writer cannot hide behind itself.
+static std::vector<std::string> json_events(const std::string &js) {
+    std::vector<std::string> out;
+    const size_t at = js.find("\"events\":[");
+    if (at == std::string::npos) return out;
+    int depth = 0;
+    bool instr = false;
+    size_t start = 0;
+    for (size_t i = at + 10; i < js.size(); i++) {
+        const char c = js[i];
+        if (instr) {
+            if (c == '\\') i++;
+            else if (c == '"') instr = false;
+            continue;
+        }
+        if (c == '"') instr = true;
+        else if (c == '{') { if (depth++ == 0) start = i; }
+        else if (c == '}') { if (--depth == 0) out.push_back(js.substr(start, i - start + 1)); }
+        else if (c == ']' && depth == 0) break;
+    }
+    return out;
 }
 
 // CollectingSink is the in-process stand-in for the Go implementation the
@@ -207,6 +242,84 @@ int main(int argc, char **argv) {
         check(json_field_b64(gen, raw), "generate carries b64");
     }
     printf("sink: %d pieces: %s\n", sink.calls, sink.text.c_str());
+
+    // Slots (continuous batching). Three tasks posted to a four-slot context
+    // must produce, greedily, exactly what generating each of them alone
+    // produces, and the partial texts must concatenate to the final text.
+    {
+        const char *sctx_params = "{\"n_ctx\":256,\"n_threads\":1,\"n_seq_max\":4}";
+        uint64_t sctx = llama_ctx_new(model, sctx_params, (uint32_t) strlen(sctx_params));
+        check(sctx != 0, "ctx_new with n_seq_max");
+        const char *prompts[3] = {"Once upon a time", "The little girl", "One day"};
+        std::string alone[3];
+        for (int i = 0; i < 3; i++) {
+            llama_ctx_reset(sctx);
+            const std::string g = llama_ctx_generate(sctx, prompts[i], (uint32_t) strlen(prompts[i]),
+                                                     params, (uint32_t) strlen(params), nullptr);
+            check(json_ok(g), "slots: generate alone");
+            check(json_field_b64(g, alone[i]), "slots: generate alone carries b64");
+        }
+        llama_ctx_reset(sctx);
+        int ids[3] = {0, 0, 0};
+        for (int i = 0; i < 3; i++) {
+            const std::string task = std::string("{\"prompt\":\"") + prompts[i] + "\",\"n_predict\":16,\"temperature\":0}";
+            const std::string r = llama_ctx_slots_post(sctx, task.c_str(), (uint32_t) task.size());
+            check(json_ok(r) && json_field_int(r, "id", ids[i]) && ids[i] == i + 1, "slots_post");
+        }
+        check(!json_ok(llama_ctx_generate(sctx, text, (uint32_t) strlen(text), params, (uint32_t) strlen(params), nullptr)),
+              "generate refuses while slots hold tasks");
+        std::string finals[3], partials[3];
+        bool done[3] = {false, false, false};
+        int rounds = 0;
+        while (!(done[0] && done[1] && done[2]) && rounds < 64) {
+            const std::string u = llama_ctx_slots_update(sctx);
+            check(json_ok(u), "slots_update");
+            rounds++;
+            for (const std::string &ev : json_events(u)) {
+                int id = 0;
+                check(json_field_int(ev, "id", id) && id >= 1 && id <= 3, "slots event carries a task id");
+                if (id < 1 || id > 3) continue;
+                std::string raw;
+                check(json_field_b64(ev, raw), "slots event carries b64");
+                if (ev.find("\"final\":") != std::string::npos) {
+                    finals[id - 1] = raw;
+                    done[id - 1] = true;
+                } else if (ev.find("\"error\":") != std::string::npos) {
+                    printf("slots error: %s\n", ev.c_str());
+                    check(false, "slots task error");
+                    done[id - 1] = true;
+                } else {
+                    partials[id - 1] += raw;
+                }
+            }
+        }
+        printf("slots: %d updates for 3 tasks\n", rounds);
+        for (int i = 0; i < 3; i++) {
+            check(done[i], "slots: every task finished");
+            check(finals[i] == alone[i], "slots: batched task text equals the task generated alone");
+            check(partials[i] == finals[i], "slots: partial texts concatenate to the final text");
+        }
+        check(json_ok(llama_ctx_generate(sctx, text, (uint32_t) strlen(text), params, (uint32_t) strlen(params), nullptr)),
+              "generate runs again once the slots are idle");
+
+        // Cancel: a queued task disappears; a busy one returns its final.
+        llama_ctx_reset(sctx);
+        const char *ltask = "{\"prompt\":\"Once upon a time\",\"n_predict\":64,\"temperature\":0}";
+        int ida = 0, idb = 0;
+        check(json_field_int(llama_ctx_slots_post(sctx, ltask, (uint32_t) strlen(ltask)), "id", ida), "slots_post (cancel a)");
+        check(json_field_int(llama_ctx_slots_post(sctx, ltask, (uint32_t) strlen(ltask)), "id", idb), "slots_post (cancel b)");
+        const std::string cb = llama_ctx_slots_cancel(sctx, idb);
+        check(json_ok(cb) && cb.find("\"queued\":true") != std::string::npos, "cancel of a queued task");
+        check(json_ok(llama_ctx_slots_update(sctx)), "slots_update before cancel");
+        check(json_ok(llama_ctx_slots_update(sctx)), "slots_update before cancel (2)");
+        const std::string ca = llama_ctx_slots_cancel(sctx, ida);
+        check(json_ok(ca) && ca.find("\"stop_reason\":\"interrupted\"") != std::string::npos, "cancel of a busy task returns its final");
+        check(!json_ok(llama_ctx_slots_cancel(sctx, ida)), "cancel of an unknown task is an error");
+        const std::string ss = llama_ctx_slots_status(sctx);
+        check(json_ok(ss) && ss.find("\"active\":0") != std::string::npos && ss.find("\"queued\":0") != std::string::npos, "slots_status idle after cancel");
+        printf("slots status: %s\n", ss.c_str());
+        llama_ctx_free(sctx);
+    }
 
     // State save/load.
     const std::string save = llama_ctx_state_save(ctx);

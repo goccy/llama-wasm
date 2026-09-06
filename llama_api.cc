@@ -20,7 +20,10 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <deque>
 #include <vector>
+
+struct SlotsState;
 
 namespace {
 
@@ -311,7 +314,14 @@ struct CtxState {
     // next cache_prompt generate clears the cache and rebuilds from scratch.
     std::vector<llama_token> hist;
     bool hist_valid = true;
+    // slots is the continuous-batching state (llama_ctx_slots_*), created on
+    // the first post and owned by the context.
+    SlotsState *slots = nullptr;
 };
+
+// Defined with the slots section below.
+bool slots_active(const CtxState *st);
+void slots_free(CtxState *st);
 
 // Process-wide bits. The error slot is thread_local so a wasi-threads agent
 // does not clobber another thread's message. It is a POD buffer rather than a
@@ -673,6 +683,7 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
 void llama_ctx_free(uint64_t ctx) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return;
+    if (st->ctx != nullptr) slots_free(st);
     if (st->ctx != nullptr) llama_free(st->ctx);
 #if defined(_REENTRANT)
     // Free the pool after the context: llama_free may still touch it.
@@ -1008,6 +1019,7 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
                                llama_wasm::token_sink *sink) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return json_err("null context handle");
+    if (slots_active(st)) return json_err("generate: slots hold tasks on this context (wait for them or reset)");
 
     llama_sampler *smpl = nullptr;
     try {
@@ -1152,6 +1164,417 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
         return json_err("generate: unknown error");
     }
 }
+
+/* ------------------------------------------------------------------- slots */
+
+// Continuous batching, after llama.cpp's server: a task is a prompt plus
+// sampling parameters; a slot runs one task on its own KV sequence; one
+// update assembles a single batch out of every busy slot (the last sampled
+// token of each generating slot, then prompt chunks of the slots still
+// processing their prompt, up to n_batch tokens in all), decodes it once,
+// samples every slot that had logits in it, and reports what happened.
+// The KV cache is unified across the sequences (ctx_new sets kv_unified
+// with n_seq_max), so admission reserves n_ctx cells: a task is launched
+// only when its prompt plus its decode budget fit next to what the busy
+// slots may still write.
+
+struct Slot {
+    llama_seq_id seq = 0;
+    int id_task = 0;                 // 0: idle
+    bool generating = false;         // prompt fully decoded; sampling from now on
+    std::vector<llama_token> prompt;
+    int n_past = 0;                  // tokens of this sequence in the KV cache
+    int budget = 0;                  // tokens it may still produce (n_predict)
+    int n_decoded = 0;
+    llama_token pending = LLAMA_TOKEN_NULL;  // sampled, not yet decoded
+    int i_batch = -1;                // row of the current batch carrying this slot's logits
+    SamplingParams sp;
+    llama_sampler *smpl = nullptr;
+    std::vector<llama_token> produced;
+    std::string text;
+    std::chrono::steady_clock::time_point t_start, t_prompt;
+
+    bool idle() const { return id_task == 0; }
+    // Cells this slot may still occupy: what it holds plus what it has yet
+    // to decode (the rest of its prompt, then its budget).
+    int reserve() const {
+        return idle() ? 0 : (int) prompt.size() + budget;
+    }
+};
+
+struct QueuedTask {
+    int id = 0;
+    std::vector<llama_token> prompt;
+    SamplingParams sp;
+    int budget = 0;
+};
+
+struct SlotsState {
+    std::vector<Slot> slots;
+    std::deque<QueuedTask> queue;
+    int next_id = 1;
+};
+
+namespace {
+
+SlotsState *slots_of(CtxState *st) {
+    if (st->slots == nullptr) {
+        st->slots = new SlotsState();
+        const uint32_t n = llama_n_seq_max(st->ctx);
+        st->slots->slots.resize(n);
+        for (uint32_t i = 0; i < n; i++) st->slots->slots[i].seq = (llama_seq_id) i;
+    }
+    return st->slots;
+}
+
+bool slots_active(const CtxState *st) {
+    if (st->slots == nullptr) return false;
+    if (!st->slots->queue.empty()) return true;
+    for (const Slot &s : st->slots->slots) {
+        if (!s.idle()) return true;
+    }
+    return false;
+}
+
+int slots_reserved(const SlotsState *ss) {
+    int n = 0;
+    for (const Slot &s : ss->slots) n += s.reserve();
+    return n;
+}
+
+// slot_release frees everything a task held: its sampler and its sequence's
+// cells. The slot is idle afterwards.
+void slot_release(CtxState *st, Slot &s) {
+    if (s.smpl != nullptr) {
+        llama_sampler_free(s.smpl);
+        s.smpl = nullptr;
+    }
+    llama_memory_seq_rm(llama_get_memory(st->ctx), s.seq, -1, -1);
+    s.id_task = 0;
+    s.generating = false;
+    s.prompt.clear();
+    s.produced.clear();
+    s.text.clear();
+    s.n_past = 0;
+    s.budget = 0;
+    s.n_decoded = 0;
+    s.pending = LLAMA_TOKEN_NULL;
+    s.i_batch = -1;
+}
+
+// slot_final renders the task's result the way llama_ctx_generate does.
+std::string slot_final(const Slot &s, const char *stop_reason, bool interrupted) {
+    const auto ms = [](std::chrono::steady_clock::duration d) {
+        return std::chrono::duration<double, std::milli>(d).count();
+    };
+    const auto now = std::chrono::steady_clock::now();
+    const auto t_prompt = s.generating ? s.t_prompt : now;
+    std::string out = "{\"id\":" + json_num(s.id_task) + ",\"final\":{";
+    out += text_fields(s.text);
+    out += ",\"tokens\":[";
+    for (size_t i = 0; i < s.produced.size(); i++) {
+        if (i != 0) out.push_back(',');
+        out += json_num(s.produced[i]);
+    }
+    out += "]";
+    out += ",\"n_prompt\":" + json_num((double) s.prompt.size());
+    out += ",\"n_cached\":0";
+    out += ",\"n_decoded\":" + json_num(s.n_decoded);
+    out += ",\"stop_reason\":" + json_str(stop_reason);
+    out += ",\"interrupted\":" + std::string(interrupted ? "true" : "false");
+    out += ",\"timings\":{\"prompt_ms\":" + json_num(ms(t_prompt - s.t_start)) +
+           ",\"decode_ms\":" + json_num(ms(now - t_prompt)) + "}";
+    out += "}}";
+    return out;
+}
+
+// slots_launch moves queued tasks into idle slots, in order, while the head
+// of the queue fits the cells the busy slots have not claimed. The queue is
+// FIFO: a head that does not fit keeps the tasks behind it waiting rather
+// than letting a smaller one overtake it.
+void slots_launch(CtxState *st, SlotsState *ss) {
+    const int n_ctx = (int) llama_n_ctx(st->ctx);
+    const llama_vocab *vocab = llama_model_get_vocab(st->model);
+    while (!ss->queue.empty()) {
+        Slot *free_slot = nullptr;
+        for (Slot &s : ss->slots) {
+            if (s.idle()) { free_slot = &s; break; }
+        }
+        if (free_slot == nullptr) return;
+        QueuedTask &t = ss->queue.front();
+        if (slots_reserved(ss) + (int) t.prompt.size() + t.budget > n_ctx) return;
+        Slot &s = *free_slot;
+        s.id_task = t.id;
+        s.prompt = std::move(t.prompt);
+        s.sp = t.sp;
+        s.budget = t.budget;
+        s.smpl = build_sampler(vocab, s.sp);
+        s.generating = false;
+        s.n_past = 0;
+        s.n_decoded = 0;
+        s.pending = LLAMA_TOKEN_NULL;
+        s.i_batch = -1;
+        s.t_start = std::chrono::steady_clock::now();
+        ss->queue.pop_front();
+    }
+}
+
+} // namespace
+
+std::string llama_ctx_slots_post(uint64_t ctx, const char *task_json,
+                                 uint32_t task_json_len) {
+    CtxState *st = ctx_of(ctx);
+    if (st == nullptr) return json_err("null context handle");
+    try {
+        if (st->generating) return json_err("slots_post: a generation is running on this context");
+        std::string prompt;
+        if (!opt_str(task_json, task_json_len, "prompt", prompt)) {
+            return json_err("slots_post: task has no prompt");
+        }
+        const SamplingParams sp = parse_params(task_json, task_json_len);
+        if (sp.cache_prompt) {
+            return json_err("slots_post: cache_prompt is not available on slots (every task decodes its own sequence)");
+        }
+        const llama_vocab *vocab = llama_model_get_vocab(st->model);
+        QueuedTask t;
+        std::string err;
+        if (!tokenize_text(vocab, prompt, /*add_special=*/true, /*parse_special=*/true, t.prompt, err)) {
+            return json_err(err);
+        }
+        if (t.prompt.empty()) return json_err("slots_post: empty prompt");
+        const int n_ctx = (int) llama_n_ctx(st->ctx);
+        t.budget = sp.n_predict < 0 ? n_ctx - (int) t.prompt.size() : sp.n_predict;
+        if (t.budget < 0) t.budget = 0;
+        if ((int) t.prompt.size() + t.budget > n_ctx) {
+            return json_err("slots_post: prompt (" + std::to_string(t.prompt.size()) +
+                            " tokens) plus n_predict (" + std::to_string(t.budget) +
+                            ") exceeds the context window (" + std::to_string(n_ctx) + ")");
+        }
+        t.sp = sp;
+        SlotsState *ss = slots_of(st);
+        t.id = ss->next_id++;
+        const int id = t.id;
+        ss->queue.push_back(std::move(t));
+        return "{\"ok\":true,\"id\":" + json_num(id) + "}";
+    } catch (const std::exception &e) {
+        return json_err(std::string("slots_post: ") + e.what());
+    } catch (...) {
+        return json_err("slots_post: unknown error");
+    }
+}
+
+std::string llama_ctx_slots_update(uint64_t ctx) {
+    CtxState *st = ctx_of(ctx);
+    if (st == nullptr) return json_err("null context handle");
+    try {
+        std::string events;
+        auto emit = [&](const std::string &ev) {
+            if (!events.empty()) events.push_back(',');
+            events += ev;
+        };
+        auto render = [&](SlotsState *ss) {
+            int active = 0;
+            if (ss != nullptr) {
+                for (const Slot &s : ss->slots) active += s.idle() ? 0 : 1;
+            }
+            return "{\"ok\":true,\"active\":" + json_num(active) +
+                   ",\"queued\":" + json_num(ss == nullptr ? 0 : (double) ss->queue.size()) +
+                   ",\"events\":[" + events + "]}";
+        };
+        if (st->slots == nullptr) return render(nullptr);
+        if (st->generating) return json_err("slots_update: a generation is running on this context");
+        SlotsState *ss = st->slots;
+        // The sequences share the cache with whatever sequence 0 held; the
+        // prefix-history bookkeeping of cache_prompt no longer describes it.
+        st->hist_valid = false;
+        slots_launch(st, ss);
+
+        // Assemble the batch: one row per generating slot (its pending token),
+        // then prompt chunks of the slots still decoding their prompt, until
+        // n_batch rows. Decode rows go first so a long prompt arriving later
+        // cannot starve the slots already producing text.
+        const int n_batch = (int) llama_n_batch(st->ctx);
+        int rows = 0;
+        for (Slot &s : ss->slots) {
+            s.i_batch = -1;
+            if (!s.idle() && s.generating && s.pending != LLAMA_TOKEN_NULL) rows++;
+        }
+        std::vector<std::pair<Slot *, int>> chunks;   // slot, tokens of its prompt in this batch
+        for (Slot &s : ss->slots) {
+            if (rows >= n_batch) break;
+            if (s.idle() || s.generating) continue;
+            const int remaining = (int) s.prompt.size() - s.n_past;
+            const int take = std::min(remaining, n_batch - rows);
+            if (take <= 0) continue;
+            chunks.emplace_back(&s, take);
+            rows += take;
+        }
+        if (rows == 0) return render(ss);
+
+        llama_batch batch = llama_batch_init(rows, 0, 1);
+        int row = 0;
+        std::vector<Slot *> in_batch;
+        for (Slot &s : ss->slots) {
+            if (s.idle() || !s.generating || s.pending == LLAMA_TOKEN_NULL) continue;
+            batch.token[row]     = s.pending;
+            batch.pos[row]       = s.n_past;
+            batch.n_seq_id[row]  = 1;
+            batch.seq_id[row][0] = s.seq;
+            batch.logits[row]    = 1;
+            s.i_batch = row;
+            in_batch.push_back(&s);
+            row++;
+        }
+        for (auto &c : chunks) {
+            Slot &s = *c.first;
+            for (int i = 0; i < c.second; i++) {
+                const int pos = s.n_past + i;
+                const bool last = pos + 1 == (int) s.prompt.size();
+                batch.token[row]     = s.prompt[pos];
+                batch.pos[row]       = pos;
+                batch.n_seq_id[row]  = 1;
+                batch.seq_id[row][0] = s.seq;
+                batch.logits[row]    = last ? 1 : 0;
+                if (last) s.i_batch = row;
+                row++;
+            }
+            in_batch.push_back(&s);
+        }
+        batch.n_tokens = row;
+        const int rc = llama_decode(st->ctx, batch);
+        llama_batch_free(batch);
+        if (rc != 0) {
+            // Nothing of this batch reached the cache; the tasks in it cannot
+            // make progress, so they end here rather than looping forever.
+            for (Slot *s : in_batch) {
+                emit("{\"id\":" + json_num(s->id_task) + ",\"error\":" +
+                     json_str(rc == 1 ? "slots_update: no room in the KV cache" : "slots_update: decode failed") + "}");
+                slot_release(st, *s);
+            }
+            return render(ss);
+        }
+
+        // Account for what the decode put in the cache.
+        for (Slot *sp : in_batch) {
+            Slot &s = *sp;
+            if (s.generating) {
+                s.n_past += 1;
+                s.pending = LLAMA_TOKEN_NULL;
+            }
+        }
+        for (auto &c : chunks) {
+            Slot &s = *c.first;
+            s.n_past += c.second;
+            if (s.n_past == (int) s.prompt.size()) {
+                s.generating = true;
+                s.t_prompt = std::chrono::steady_clock::now();
+            }
+        }
+
+        // Sample every slot whose logits this batch carried.
+        const llama_vocab *vocab = llama_model_get_vocab(st->model);
+        for (Slot &s : ss->slots) {
+            if (s.idle() || s.i_batch < 0) continue;
+            const int i_batch = s.i_batch;
+            s.i_batch = -1;
+            if (s.budget == 0) {
+                // n_predict 0: the prompt was decoded and nothing may be produced.
+                emit(slot_final(s, "length", false));
+                slot_release(st, s);
+                continue;
+            }
+            const llama_token tok = llama_sampler_sample(s.smpl, st->ctx, i_batch);
+            if (llama_vocab_is_eog(vocab, tok)) {
+                emit(slot_final(s, "eos", false));
+                slot_release(st, s);
+                continue;
+            }
+            s.produced.push_back(tok);
+            s.n_decoded++;
+            const std::string piece = piece_of(vocab, tok, /*special=*/false);
+            const size_t piece_start = s.text.size();
+            s.text += piece;
+            emit("{\"id\":" + json_num(s.id_task) + ",\"token\":" + json_num(tok) + "," + text_fields(piece) + "}");
+            size_t cut = 0;
+            if (find_stop(s.text, s.sp.stop, piece_start, cut)) {
+                s.text.resize(cut);
+                emit(slot_final(s, "stop", false));
+                slot_release(st, s);
+                continue;
+            }
+            if (s.n_decoded == s.budget) {
+                emit(slot_final(s, "length", false));
+                slot_release(st, s);
+                continue;
+            }
+            s.pending = tok;
+        }
+        return render(ss);
+    } catch (const std::exception &e) {
+        return json_err(std::string("slots_update: ") + e.what());
+    } catch (...) {
+        return json_err("slots_update: unknown error");
+    }
+}
+
+std::string llama_ctx_slots_cancel(uint64_t ctx, int32_t id) {
+    CtxState *st = ctx_of(ctx);
+    if (st == nullptr) return json_err("null context handle");
+    try {
+        SlotsState *ss = st->slots;
+        if (ss == nullptr) return json_err("slots_cancel: no such task");
+        for (auto it = ss->queue.begin(); it != ss->queue.end(); ++it) {
+            if (it->id == id) {
+                ss->queue.erase(it);
+                return "{\"ok\":true,\"queued\":true}";
+            }
+        }
+        for (Slot &s : ss->slots) {
+            if (!s.idle() && s.id_task == id) {
+                const std::string final = slot_final(s, "interrupted", true);
+                slot_release(st, s);
+                return "{\"ok\":true,\"queued\":false," + final.substr(1);
+            }
+        }
+        return json_err("slots_cancel: no such task");
+    } catch (const std::exception &e) {
+        return json_err(std::string("slots_cancel: ") + e.what());
+    } catch (...) {
+        return json_err("slots_cancel: unknown error");
+    }
+}
+
+std::string llama_ctx_slots_status(uint64_t ctx) {
+    CtxState *st = ctx_of(ctx);
+    if (st == nullptr) return json_err("null context handle");
+    int n_slots = (int) llama_n_seq_max(st->ctx), active = 0, queued = 0, used = 0;
+    if (st->slots != nullptr) {
+        queued = (int) st->slots->queue.size();
+        for (const Slot &s : st->slots->slots) {
+            if (s.idle()) continue;
+            active++;
+            used += s.n_past;
+        }
+    }
+    return "{\"ok\":true,\"n_slots\":" + json_num(n_slots) + ",\"active\":" + json_num(active) +
+           ",\"queued\":" + json_num(queued) + ",\"n_ctx\":" + json_num((double) llama_n_ctx(st->ctx)) +
+           ",\"used\":" + json_num(used) + "}";
+}
+
+namespace {
+
+// slots_free drops every task — queued ones silently, busy ones with their
+// sampler and cells — and the slots state itself. Used by reset and free.
+void slots_free(CtxState *st) {
+    if (st->slots == nullptr) return;
+    for (Slot &s : st->slots->slots) {
+        if (!s.idle()) slot_release(st, s);
+    }
+    delete st->slots;
+    st->slots = nullptr;
+}
+
+} // namespace
 
 std::string llama_chat_apply_template(uint64_t model, const char *messages_json,
                                       uint32_t messages_json_len,
@@ -1484,6 +1907,8 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
 std::string llama_ctx_score(uint64_t ctx, const char *text, uint32_t text_len) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return json_err("null context handle");
+    if (slots_active(st)) return json_err("score: slots hold tasks on this context (wait for them or reset)");
+    if (slots_active(st)) return json_err("speculative: slots hold tasks on this context (wait for them or reset)");
     try {
         const llama_vocab *vocab = llama_model_get_vocab(st->model);
         std::vector<llama_token> toks;
@@ -1577,6 +2002,7 @@ std::string llama_ctx_score_choices(uint64_t ctx, const char *choices,
                                     uint32_t choices_len) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return json_err("null context handle");
+    if (slots_active(st)) return json_err("score_choices: slots hold tasks on this context (wait for them or reset)");
     try {
         const llama_vocab *vocab = llama_model_get_vocab(st->model);
         const int n_vocab = llama_vocab_n_tokens(vocab);
@@ -1816,6 +2242,7 @@ std::string llama_ctx_embed(uint64_t ctx, const char *text, uint32_t text_len,
                             int32_t normalize) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return json_err("null context handle");
+    if (slots_active(st)) return json_err("embed: slots hold tasks on this context (wait for them or reset)");
     try {
         const llama_vocab *vocab = llama_model_get_vocab(st->model);
         std::vector<llama_token> toks;
@@ -1836,6 +2263,7 @@ std::string llama_ctx_embed_tokens(uint64_t ctx, const char *tokens_json,
                                    uint32_t tokens_json_len, int32_t normalize) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return json_err("null context handle");
+    if (slots_active(st)) return json_err("embed_tokens: slots hold tasks on this context (wait for them or reset)");
     try {
         JsonReader r(tokens_json, tokens_json_len);
         if (!r.eat('[')) return json_err("embed_tokens: expected a JSON array");
@@ -1864,6 +2292,7 @@ std::string llama_ctx_eval(uint64_t ctx, const char *text, uint32_t text_len,
                            int32_t add_special, int32_t parse_special) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return json_err("null context handle");
+    if (slots_active(st)) return json_err("eval: slots hold tasks on this context (wait for them or reset)");
     try {
         const llama_vocab *vocab = llama_model_get_vocab(st->model);
         std::vector<llama_token> toks;
@@ -1903,6 +2332,7 @@ std::string llama_ctx_eval(uint64_t ctx, const char *text, uint32_t text_len,
 void llama_ctx_reset(uint64_t ctx) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr || st->ctx == nullptr) return;
+    slots_free(st);
     llama_memory_clear(llama_get_memory(st->ctx), true);
     st->hist.clear();
     st->hist_valid = true;
@@ -1925,6 +2355,7 @@ constexpr uint32_t kHistInvalid = 0xFFFFFFFFu;
 std::string llama_ctx_state_save(uint64_t ctx) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return json_err("null context handle");
+    if (slots_active(st)) return json_err("state_save: slots hold tasks on this context (wait for them or reset)");
     try {
         const size_t n = llama_state_get_size(st->ctx);
         const uint32_t n_hist =
@@ -1959,6 +2390,7 @@ std::string llama_ctx_state_load(uint64_t ctx, const char *data,
                                  uint32_t size) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return json_err("null context handle");
+    if (slots_active(st)) return json_err("state_load: slots hold tasks on this context (wait for them or reset)");
     try {
         const uint8_t *src = reinterpret_cast<const uint8_t *>(data);
         size_t payload_off = 0;
