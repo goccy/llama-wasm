@@ -98,7 +98,10 @@ func callDot(t *testing.T, kernel dotKernel, n int, x, y []byte) float32 {
 	put32(mem, sOff, 12345)
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	before := append([]byte(nil), mem...)
 	kernel(m, int32(n), int64(sOff), 0, int64(xOff), 0, int64(yOff), 0, 1)
+	refCheck(t, kernel, before, mem, []refArg{rI32(int32(n)), rPtr(int64(sOff)), rI64(0), rPtr(int64(xOff)), rI64(0), rPtr(int64(yOff)), rI64(0), rI32(1)},
+		nil, []refOut{outF32(sOff, 4)}, refTolDot)
 	for off := range mem {
 		if off >= sOff && off < sOff+4 {
 			continue
@@ -133,7 +136,10 @@ func callDot2(t *testing.T, kernel dotKernel, n int, x0, x1, y0, y1 []byte) [4]f
 	}
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	before := append([]byte(nil), mem...)
 	kernel(m, int32(n), int64(sOff), 16, int64(xOff), int64(len(x0)), int64(yOff), int64(len(y0)), 2)
+	refCheck(t, kernel, before, mem, []refArg{rI32(int32(n)), rPtr(int64(sOff)), rI64(16), rPtr(int64(xOff)), rI64(int64(len(x0))), rPtr(int64(yOff)), rI64(int64(len(y0))), rI32(2)},
+		nil, []refOut{outF32(sOff, 8), outF32(sOff+64, 8)}, refTolDot)
 	for off := sOff + 8; off < sOff+64; off++ {
 		if mem[off] != 0 {
 			t.Fatalf("n=%d byte %d between the tile rows written", n, off)
@@ -207,6 +213,6 @@ func TestA64VecDotQ5_0KernelGate(t *testing.T) {
 	body := a64VecDotQ5_0Kernel("Q5Kernel", pool, true) + "\n" + pool.Emit()
 	asm := wrap("arm64", "Q5Kernel", 16, argBytes, "dotprod", body)
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+q5_0RunSrc+q5_0Decls, q5_0RunTest)
+	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+q5_0RunSrc+q5_0Decls, q5_0RunTest, "Q5Kernel", "dbg_vec_dot_q5_0_q8_0")
 	runArm64Gate(t, dir, ".", "TestQ5_0", asm)
 }

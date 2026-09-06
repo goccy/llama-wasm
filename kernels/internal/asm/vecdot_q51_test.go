@@ -123,7 +123,7 @@ func TestA64VecDotQx1KernelGate(t *testing.T) {
 	asm := wrap("arm64", "Q51Kernel", 16, argBytes, "dotprod", a64VecDotQ5_1Kernel("Q51Kernel", pool, true)) +
 		wrap("arm64", "Q41Kernel", 16, argBytes, "dotprod", a64VecDotQ4_1Kernel("Q41Kernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+qx1RunSrc+qx1Decls, qx1RunTest)
+	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+qx1RunSrc+qx1Decls, qx1RunTest, "Q41Kernel", "dbg_vec_dot_q4_1_q8_1", "Q51Kernel", "dbg_vec_dot_q5_1_q8_1")
 	runArm64Gate(t, dir, ".", "TestQx1", asm)
 }
 
@@ -133,6 +133,6 @@ func TestX64VecDotQx1KernelGate(t *testing.T) {
 	asm := wrap("amd64", "Q51Kernel", 16, argBytes, "avx2", x64VecDotQ5_1Kernel("Q51Kernel", pool, true)) +
 		wrap("amd64", "Q41Kernel", 16, argBytes, "avx2", x64VecDotQ4_1Kernel("Q41Kernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+qx1RunSrc+qx1Decls, qx1RunTest)
+	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+qx1RunSrc+qx1Decls, qx1RunTest, "Q41Kernel", "dbg_vec_dot_q4_1_q8_1", "Q51Kernel", "dbg_vec_dot_q5_1_q8_1")
 	runAmd64Gate(t, dir, ".", "TestQx1", asm)
 }

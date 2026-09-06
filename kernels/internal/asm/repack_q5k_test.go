@@ -147,7 +147,10 @@ func runGemvQ5K(t *testing.T, kernel gemvKernel, n, nc int, seed uint32) {
 	copy(mem[yOff:], y)
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	before := append([]byte(nil), mem...)
 	kernel(m, int32(n), int64(sOff), int64(nc), int64(xOff), int64(yOff), 1, int32(nc))
+	refCheck(t, kernel, before, mem, []refArg{rI32(int32(n)), rPtr(int64(sOff)), rI64(int64(nc)), rPtr(int64(xOff)), rPtr(int64(yOff)), rI32(1), rI32(int32(nc))},
+		nil, []refOut{outF32(sOff, 4*nc)}, refTolGemm)
 	for c := 0; c < nc; c++ {
 		want, mag := dotQ5KRow(rows[c], yv, nb)
 		if got := get32(mem, sOff+4*c); !closeMag(got, want, mag) {
@@ -194,7 +197,10 @@ func runGemmQ5K(t *testing.T, kernel gemmKernel, n, nr, nc int, seed uint32) {
 	copy(mem[yOff:], vy)
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	before := append([]byte(nil), mem...)
 	kernel(m, int32(n), int64(sOff), int64(bs), int64(xOff), int64(yOff), int32(nr), int32(nc))
+	refCheck(t, kernel, before, mem, []refArg{rI32(int32(n)), rPtr(int64(sOff)), rI64(int64(bs)), rPtr(int64(xOff)), rPtr(int64(yOff)), rI32(int32(nr)), rI32(int32(nc))},
+		nil, []refOut{outF32(sOff, 4*((nr-1)*bs+nc))}, refTolGemm)
 	for r := 0; r < nr; r++ {
 		for c := 0; c < nc; c++ {
 			want, mag := dotQ5KRow(rows[c], yvs[r], nb)
@@ -243,7 +249,7 @@ func TestA64Q5K8x8KernelGate(t *testing.T) {
 	asm := wrap("arm64", "GemvKernel", 16, argBytes, "dotprod", a64GemvQ5K8x8Kernel("GemvKernel", true)) +
 		wrap("arm64", "GemmKernel", a64GemmQ4KFrame, argBytes, "i8mm", a64GemmQ5K8x8Kernel("GemmKernel", true))
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+kQuantRunSrc+q4Kx8RunSrc+q5Kx8RunSrc+q6Kx8Decls, q5Kx8RunTest)
+	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+kQuantRunSrc+q4Kx8RunSrc+q5Kx8RunSrc+q6Kx8Decls, q5Kx8RunTest, "GemmKernel", "dbg_gemm_q5_K_8x8", "GemvKernel", "dbg_gemv_q5_K_8x8")
 	runArm64Gate(t, dir, ".", "TestGem[vm]Q5K", asm)
 }
 

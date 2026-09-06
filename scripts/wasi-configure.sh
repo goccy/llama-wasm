@@ -37,22 +37,40 @@ if [ ! -d "$HERE/llama.cpp/ggml" ]; then
 fi
 
 # Apply the project's llama.cpp patches: sources the upstream tree does
-# not carry (the wasm q8_0 repack kernels). Idempotent — a fresh
-# checkout applies each patch, a tree that already has it is left
-# alone, and anything in between is an error rather than a silent
-# half-patched build.
-for p in "$HERE"/patches/*.patch; do
-  [ -e "$p" ] || continue
-  if git -C "$HERE/llama.cpp" apply --check "$p" 2>/dev/null; then
+# not carry (the wasm kernels and their exports). The series is stacked —
+# later patches modify files earlier ones create — so it is applied as a
+# whole from the pinned commit. A fresh checkout takes the series directly.
+# A tree that already carries it (a local rebuild) is put back to the pinned
+# commit first, but only on the paths the series touches, which
+# `git apply --numstat` reports without applying anything; a change outside
+# those paths is someone's work in progress and is left alone with an error
+# rather than reset or half-patched.
+series=("$HERE"/patches/*.patch)
+if [ -e "${series[0]}" ]; then
+  touched=$(git -C "$HERE/llama.cpp" apply --numstat "${series[@]}" | cut -f3 | sort -u)
+  dirty=$(git -C "$HERE/llama.cpp" status --porcelain --untracked-files=all | cut -c4- | sort -u)
+  if [ -n "$dirty" ]; then
+    foreign=$(comm -23 <(printf '%s\n' "$dirty") <(printf '%s\n' "$touched"))
+    if [ -n "$foreign" ]; then
+      echo "llama.cpp has local changes outside the patch series; commit them into a patch or reset them:" >&2
+      printf '  %s\n' $foreign >&2
+      exit 1
+    fi
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      if git -C "$HERE/llama.cpp" ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+        git -C "$HERE/llama.cpp" checkout -q -- "$path"
+      else
+        rm -f "$HERE/llama.cpp/$path"
+      fi
+    done <<< "$dirty"
+    echo "== reset $(printf '%s\n' "$dirty" | wc -l | tr -d ' ') patched path(s) to the pinned llama.cpp"
+  fi
+  for p in "${series[@]}"; do
     git -C "$HERE/llama.cpp" apply "$p"
     echo "== applied patch: $(basename "$p")"
-  elif git -C "$HERE/llama.cpp" apply --reverse --check "$p" 2>/dev/null; then
-    echo "== patch already applied: $(basename "$p")"
-  else
-    echo "patch does not apply cleanly: $p" >&2
-    exit 1
-  fi
-done
+  done
+fi
 
 echo "== wasi sdk:  $WASI_SDK_PATH"
 bash "$HERE/scripts/build-eh-runtimes.sh"

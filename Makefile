@@ -119,7 +119,7 @@ WASMIFY_PIPELINE = \
 # protoc-gen-wasmify-go mid-transpile on a wasm this size and reports only
 # "signal: killed".
 
-.PHONY: all wasm wasm-clean deps-clean tools bundle-gomod link-check-bundle smoke verify-patches shell image-pull help
+.PHONY: all wasm wasm-build verify-kernels wasm-clean deps-clean tools bundle-gomod link-check-bundle smoke verify-patches shell image-pull help
 
 all: wasm
 
@@ -185,6 +185,42 @@ wasm:
 # fetched on first run.
 smoke:
 	bash scripts/run-smoke.sh
+
+# Rebuild llama.wasm alone, host-direct and incrementally: re-applies the
+# patches (idempotent) and replays the recorded compile steps, so only the
+# sources that changed are recompiled (about a minute when a patch or the
+# bridge changed, seconds when nothing did). Needs a completed `make wasm`
+# once, for the recorded build plan and the toolchain; `make wasm` remains
+# the full pipeline (bridge, transpile, bundle).
+wasm-build:
+	@test -f build.json || { echo "build.json missing — run 'make wasm' once for the recorded build plan" >&2; exit 1; }
+	$(BUILD_ENV) bash scripts/wasi-configure.sh
+	$(BUILD_ENV) wasmify wasm-build --optimize --non-interactive
+
+# The kernel differential gate: every assembly override body against the C
+# body it replaces (the dbg_* export of llama.wasm, compiled from the pinned
+# llama.cpp commit), on identical inputs, byte for byte outside the outputs
+# and to a per-family tolerance inside them. This is what says an override
+# still computes what llama.cpp computes after a submodule bump; the unit
+# gates alone only say it computes what its float reference says. Run it
+# before pushing any change to kernels/, patches/ or the submodule; CI runs
+# the same command on both architectures with the llama.wasm its build job
+# produced. Rebuilds llama.wasm incrementally first (see wasm-build).
+# A Go toolchain running under Rosetta (darwin/amd64 on an Apple-silicon Mac)
+# would assemble the arm64 bodies but execute nothing, so the gates are then
+# built for arm64 and run natively. The hardware is asked directly because
+# make itself may be running under Rosetta, where uname reports x86_64.
+verify-kernels: wasm-build
+	@set -eu; cd kernels; \
+	if [ "$$(uname -s)" = Darwin ] && [ "$$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] && [ "$$(go env GOARCH)" = amd64 ]; then \
+		bin=$$(mktemp -t kernel-gates); trap 'rm -f "$$bin"' EXIT; \
+		GOARCH=arm64 go test -c -o "$$bin" ./internal/asm; \
+		(cd internal/asm && /usr/bin/arch -arm64 "$$bin" -test.count=1 -test.run 'Gate$$' \
+			-require-llama-wasm -llama-wasm $(abspath $(WASM_OUTPUT))); \
+	else \
+		go test ./internal/asm -count=1 -run 'Gate$$' \
+			-args -require-llama-wasm -llama-wasm $(abspath $(WASM_OUTPUT)); \
+	fi
 
 # Prove the built wasm reflects every patch scripts/wasi-configure.sh
 # applies. "applied patch" in a build log is not evidence — a stale object
@@ -277,6 +313,8 @@ help:
 	@echo 'Targets:'
 	@echo '  wasm         Build llama.wasm + wasm2go bundle inside $(IMAGE)'
 	@echo '  smoke        Build and run the bridge smoke test (no Go involved)'
+	@echo '  wasm-build   Rebuild llama.wasm only, host-direct and incremental'
+	@echo '  verify-kernels  Kernel differential gate: asm overrides vs the C bodies in llama.wasm'
 	@echo '  verify-patches  Check the built wasm reflects every patches/*.patch'
 	@echo '  wasm-clean   Drop generated artefacts; keep committed inputs and deps/'
 	@echo '  deps-clean   Drop deps/ (the EH-enabled C++ runtimes)'

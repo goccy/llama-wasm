@@ -91,6 +91,40 @@ and run the tests:
 cd kernels && go test ./...
 ```
 
+## Verifying against the C bodies
+
+The float references above say a body computes what *we* think the
+format means. They do not say it still computes what llama.cpp computes:
+a submodule bump can change a repacked block layout, an activation
+quantizer or a fold order without touching the export's signature, and
+the override would keep running the old arithmetic on new data. The
+differential gate closes that gap. When `llama.wasm` is available, every
+gate also replays each kernel call on the C body it replaces — the
+`dbg_*` export of the wasm, compiled from the pinned llama.cpp commit,
+run under node by `scripts/kernel-diff.js` — with the same memory image
+and arguments, and compares the two images: byte for byte outside the
+declared outputs, to a per-family tolerance inside them (exact for the
+activation quantizers). The tolerances and the differences measured
+against them are documented in `internal/asm/wasmref_test.go`.
+
+Run it before pushing any change to `kernels/`, `patches/` or the
+submodule:
+
+```
+make verify-kernels
+```
+
+This rebuilds `llama.wasm` incrementally (`make wasm-build`: patches
+re-applied, only changed sources recompiled — about a minute after a
+patch or bridge change, seconds otherwise; it needs one full `make wasm`
+first for the recorded build plan) and runs the gates with
+`-require-llama-wasm`, which fails when the wasm or node is missing and
+when any export with a body for the host architecture was not compared.
+Plain `go test ./...` skips the replay when there is no `llama.wasm`, so
+the unit gates stay self-contained. CI runs the same command on arm64 and
+amd64 (the `kernel-diff` job) with the `llama.wasm` its build job
+produced.
+
 The end-to-end check — the override bodies against wasm2go's own
 lowering of the same exports — is go-llama's test suite against a bundle
 built from this tree (its wikitext-2 perplexity parity and native-parity

@@ -176,7 +176,13 @@ func runAttn(t *testing.T, kernel attnKernel, DK, DV, n, start, pad int, withMas
 	put32(mem, argOff+80, slope)
 	put32(mem, argOff+84, scale)
 	put64(mem, argOff+88, uint64(uint32(DK))|uint64(uint32(DV))<<32)
+	before := append([]byte(nil), mem...)
 	kernel(m, int64(argOff))
+	// The argument block carries pointers (q, k, v, mask, S/M, VKQ); the
+	// worker rebases them into its image.
+	refCheck(t, kernel, before, mem, []refArg{rPtr(int64(argOff))},
+		[]int{argOff + 0, argOff + 8, argOff + 24, argOff + 40, argOff + 48, argOff + 56},
+		[]refOut{outF32(smOff, 8), outF32(vkqOff, 4*DV)}, refTolAttn)
 	// reference
 	for p := start; p < n; p++ {
 		mv := 0.0
@@ -342,7 +348,13 @@ func runAttnLayout(t *testing.T, kernel attnKernel, DK, DV, n int, holes []int, 
 	put32(mem, argOff+80, 0.5)
 	put32(mem, argOff+84, 0.125)
 	put64(mem, argOff+88, uint64(uint32(DK))|uint64(uint32(DV))<<32)
+	before := append([]byte(nil), mem...)
 	kernel(m, int64(argOff))
+	// The argument block carries pointers (q, k, v, mask, S/M, VKQ); the
+	// worker rebases them into its image.
+	refCheck(t, kernel, before, mem, []refArg{rPtr(int64(argOff))},
+		[]int{argOff + 0, argOff + 8, argOff + 24, argOff + 40, argOff + 48, argOff + 56},
+		[]refOut{outF32(smOff, 8), outF32(vkqOff, 4*DV)}, refTolAttn)
 	out := make([]byte, 8+4*DV)
 	copy(out, mem[smOff:smOff+8])
 	copy(out[8:], mem[vkqOff:vkqOff+4*DV])
@@ -406,7 +418,7 @@ func TestA64FlashAttnKernelGate(t *testing.T) {
 	body := a64FlashAttnKernel("AttnKernel", pool, true) + "\n" + pool.Emit()
 	asm := wrap("arm64", "AttnKernel", 16, argBytes, "neon", body)
 	dir := t.TempDir()
-	writeRunTree(t, dir, "attnrun", "arm64", asm, flashAttnRunSrc+flashAttnDecls, flashAttnRunTest)
+	writeRunTree(t, dir, "attnrun", "arm64", asm, flashAttnRunSrc+flashAttnDecls, flashAttnRunTest, "AttnKernel", "dbg_flash_attn_kv_f16")
 	runArm64Gate(t, dir, ".", "TestFlashAttn", asm)
 }
 
@@ -416,7 +428,7 @@ func TestX64FlashAttnKernelGate(t *testing.T) {
 	body := x64FlashAttnKernel("AttnKernel", pool, true) + "\n" + pool.Emit()
 	asm := wrap("amd64", "AttnKernel", x64FAFrame, argBytes, "avx2", body)
 	dir := t.TempDir()
-	writeRunTree(t, dir, "attnrun", "amd64", asm, flashAttnRunSrc+flashAttnDecls, flashAttnRunTest)
+	writeRunTree(t, dir, "attnrun", "amd64", asm, flashAttnRunSrc+flashAttnDecls, flashAttnRunTest, "AttnKernel", "dbg_flash_attn_kv_f16")
 	runAmd64Gate(t, dir, ".", "TestFlashAttn", asm)
 }
 
@@ -690,7 +702,13 @@ func runAttn(t *testing.T, kernel attnKernel, DK, DV, n, start, pad int, withMas
 	put32(mem, argOff+80, slope)
 	put32(mem, argOff+84, scale)
 	put64(mem, argOff+88, uint64(uint32(DK))|uint64(uint32(DV))<<32)
+	before := append([]byte(nil), mem...)
 	kernel(m, int64(argOff))
+	// The argument block carries pointers (q, k, v, mask, S/M, VKQ); the
+	// worker rebases them into its image.
+	refCheck(t, kernel, before, mem, []refArg{rPtr(int64(argOff))},
+		[]int{argOff + 0, argOff + 8, argOff + 24, argOff + 40, argOff + 48, argOff + 56},
+		[]refOut{outF32(smOff, 8), outF32Tol(vkqOff, 4*DV, refTolAttnF16)}, refTolAttn)
 	// DV other than 64/128 runs the body's per-position f32 loop (the
 	// NEON algorithm): the exact float64 reference.
 	if DV != 64 && DV != 128 {
@@ -926,7 +944,13 @@ func runAttnLayout(t *testing.T, kernel attnKernel, DK, DV, n int, holes []int, 
 	put32(mem, argOff+80, 0.5)
 	put32(mem, argOff+84, 0.125)
 	put64(mem, argOff+88, uint64(uint32(DK))|uint64(uint32(DV))<<32)
+	before := append([]byte(nil), mem...)
 	kernel(m, int64(argOff))
+	// The argument block carries pointers (q, k, v, mask, S/M, VKQ); the
+	// worker rebases them into its image.
+	refCheck(t, kernel, before, mem, []refArg{rPtr(int64(argOff))},
+		[]int{argOff + 0, argOff + 8, argOff + 24, argOff + 40, argOff + 48, argOff + 56},
+		[]refOut{outF32(smOff, 8), outF32Tol(vkqOff, 4*DV, refTolAttnF16)}, refTolAttn)
 	out := make([]byte, 8+4*DV)
 	copy(out, mem[smOff:smOff+8])
 	copy(out[8:], mem[vkqOff:vkqOff+4*DV])
@@ -987,6 +1011,6 @@ func TestA64FlashAttnFHMKernelGate(t *testing.T) {
 	body := a64FlashAttnFHMKernel("AttnKernel", pool, true) + "\n" + pool.Emit()
 	asm := wrap("arm64", "AttnKernel", faFHMFrame, argBytes, "fhm", body)
 	dir := t.TempDir()
-	writeRunTree(t, dir, "attnrun", "arm64", asm, flashAttnFHMRunSrc+flashAttnDecls, flashAttnFHMRunTest)
+	writeRunTree(t, dir, "attnrun", "arm64", asm, flashAttnFHMRunSrc+flashAttnDecls, flashAttnFHMRunTest, "AttnKernel", "dbg_flash_attn_kv_f16")
 	runArm64Gate(t, dir, ".", "TestFlashAttn", asm)
 }

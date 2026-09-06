@@ -96,7 +96,10 @@ func runGemv(t *testing.T, kernel func(m *mockModule, l0 int32, l1, l2, l3, l4 i
 	}
 	memSize := uint64(len(mem))
 	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	before := append([]byte(nil), mem...)
 	kernel(m, int32(n), int64(sOff), 0, int64(vxOff), int64(vyOff), 1, int32(nc))
+	refCheck(t, kernel, before, mem, []refArg{rI32(int32(n)), rPtr(int64(sOff)), rI64(0), rPtr(int64(vxOff)), rPtr(int64(vyOff)), rI32(1), rI32(int32(nc))},
+		nil, []refOut{outF32(sOff, 4*nc)}, refTolGemm)
 	for x := 0; x < nc/4; x++ {
 		for col := 0; col < 4; col++ {
 			var want float64
@@ -145,7 +148,7 @@ func TestA64RepackGemvKernelGate(t *testing.T) {
 	dir := t.TempDir()
 	writeRunTree(t, dir, "gemvrun", "arm64", kernel, repackGemvRunSrc+
 		"\nfunc GemvKernel(m *mockModule, l0 int32, l1, l2, l3, l4 int64, l5, l6 int32)\nfunc trapstub()\n\nvar _ = trapstub\n",
-		repackGemvRunTest)
+		repackGemvRunTest, "GemvKernel", "dbg_gemv_q8_0_4x4")
 	runArm64Gate(t, dir, ".", "TestGemv", kernel)
 }
 
@@ -173,7 +176,7 @@ func TestGemvX64VNNI(t *testing.T) {
 		runGemv(t, GemvKernelVNNI, c[0], c[1])
 	}
 }
-`)
+`, "GemvKernel", "dbg_gemv_q8_0_4x4", "GemvKernelVNNI", "dbg_gemv_q8_0_4x4")
 	runName := "TestGemvX64$"
 	if hostHasVNNI(t) {
 		runName = "TestGemvX64"
