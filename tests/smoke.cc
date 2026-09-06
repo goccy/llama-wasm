@@ -3,6 +3,7 @@
 // eyeballed against llama_api.h.
 #include "llama_api.h"
 
+#include <cinttypes>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -45,6 +46,38 @@ static void json_escape_into(std::string &out, const std::string &s) {
     }
 }
 
+// json_field_b64 returns the decoded bytes of the "b64" field of a result, or
+// an empty string with ok=false when the field is missing. It is the test's
+// own decoder so a bug in the bridge's encoder cannot hide behind itself.
+static bool json_field_b64(const std::string &js, std::string &out) {
+    const std::string key = "\"b64\":\"";
+    const size_t at = js.find(key);
+    if (at == std::string::npos) return false;
+    const size_t end = js.find('"', at + key.size());
+    if (end == std::string::npos) return false;
+    const std::string enc = js.substr(at + key.size(), end - at - key.size());
+    out.clear();
+    uint32_t acc = 0;
+    int bits = 0;
+    for (char ch : enc) {
+        int v;
+        if (ch >= 'A' && ch <= 'Z') v = ch - 'A';
+        else if (ch >= 'a' && ch <= 'z') v = ch - 'a' + 26;
+        else if (ch >= '0' && ch <= '9') v = ch - '0' + 52;
+        else if (ch == '+') v = 62;
+        else if (ch == '/') v = 63;
+        else if (ch == '=') break;
+        else return false;
+        acc = (acc << 6) | (uint32_t) v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out.push_back((char) ((acc >> bits) & 0xff));
+        }
+    }
+    return true;
+}
+
 // CollectingSink is the in-process stand-in for the Go implementation the
 // bridge generates: it just accumulates what the generation loop hands it.
 struct CollectingSink : llama_wasm::token_sink {
@@ -70,7 +103,7 @@ int main(int argc, char **argv) {
     const std::string info = llama_model_info(model);
     check(json_ok(info), "model_info");
     printf("info: %s\n", info.c_str());
-    printf("progress_addr: %u\n", llama_model_load_progress_addr());
+    printf("progress_addr: %" PRIu64 "\n", llama_model_load_progress_addr());
 
     const char *text = "Once upon a time";
     const std::string tk = llama_tokenize(model, text, (uint32_t) strlen(text), 1, 1);
@@ -85,17 +118,50 @@ int main(int argc, char **argv) {
     const std::string dt = llama_detokenize(model, arr.data(), (uint32_t) arr.size(), 0);
     check(json_ok(dt), "detokenize");
     printf("detokenize: %s\n", dt.c_str());
+    {
+        std::string raw, escaped;
+        check(json_field_b64(dt, raw), "detokenize carries b64");
+        json_escape_into(escaped, raw);
+        check(dt.find("\"text\":\"" + escaped + "\"") != std::string::npos, "detokenize b64 decodes to the text field");
+    }
+
+    // A byte-fallback token is a single byte >= 0x80: not valid UTF-8 on its
+    // own, so a JSON string cannot carry it losslessly. Find one and make
+    // sure the b64 fields of token_to_piece and detokenize both return
+    // exactly that byte.
+    {
+        int32_t byte_tok = -1;
+        std::string byte_piece;
+        for (int32_t t = 0; t < 512 && byte_tok < 0; t++) {
+            std::string raw;
+            const std::string p = llama_token_to_piece(model, t, 0);
+            if (json_ok(p) && json_field_b64(p, raw) && raw.size() == 1 && ((unsigned char) raw[0]) >= 0x80) {
+                byte_tok = t;
+                byte_piece = raw;
+            }
+        }
+        check(byte_tok >= 0, "vocabulary has a byte-fallback token");
+        if (byte_tok >= 0) {
+            char one[16];
+            snprintf(one, sizeof(one), "[%d]", byte_tok);
+            std::string raw;
+            const std::string d1 = llama_detokenize(model, one, (uint32_t) strlen(one), 0);
+            check(json_ok(d1) && json_field_b64(d1, raw) && raw == byte_piece,
+                  "detokenize returns a partial UTF-8 byte losslessly via b64");
+        }
+    }
 
     const std::string piece = llama_token_to_piece(model, 1, 0);
     check(json_ok(piece), "token_to_piece");
 
-    uint64_t ctx = llama_ctx_new(model, 128, 0, 0, 1, 0, 0);
+    const char *cparams = "{\"n_ctx\":128,\"n_threads\":1}";
+    uint64_t ctx = llama_ctx_new(model, cparams, (uint32_t) strlen(cparams));
     check(ctx != 0, "ctx_new");
     if (ctx == 0) {
         printf("last_error: %s\n", llama_wasm_last_error().c_str());
         return 1;
     }
-    printf("interrupt_addr: %u\n", llama_ctx_interrupt_addr(ctx));
+    printf("interrupt_addr: %" PRIu64 "\n", llama_ctx_interrupt_addr(ctx));
 
     const char *params = "{\"n_predict\":16,\"temperature\":0}";
     const std::string gen = llama_ctx_generate(ctx, text, (uint32_t) strlen(text),
@@ -107,7 +173,9 @@ int main(int argc, char **argv) {
     llama_ctx_reset(ctx);
     const std::string gen2 = llama_ctx_generate(ctx, text, (uint32_t) strlen(text),
                                                 params, (uint32_t) strlen(params), nullptr);
-    check(gen == gen2, "greedy generation is reproducible");
+    // Everything but the wall-clock timings must match.
+    check(gen.substr(0, gen.find(",\"timings\"")) == gen2.substr(0, gen2.find(",\"timings\"")),
+          "greedy generation is reproducible");
 
     // Stop strings.
     const char *pstop = "{\"n_predict\":32,\"temperature\":0,\"stop\":[\" \"]}";
@@ -133,6 +201,11 @@ int main(int argc, char **argv) {
     std::string escaped;
     json_escape_into(escaped, sink.text);
     check(gs.find(escaped) != std::string::npos, "sink text matches the returned text");
+    {
+        std::string raw;
+        check(json_field_b64(gs, raw) && raw == sink.text, "generate b64 is byte-identical to the sink text");
+        check(json_field_b64(gen, raw), "generate carries b64");
+    }
     printf("sink: %d pieces: %s\n", sink.calls, sink.text.c_str());
 
     // State save/load.

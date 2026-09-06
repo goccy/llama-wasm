@@ -51,8 +51,10 @@ void json_escape(std::string &out, const char *s, size_t n) {
                 } else {
                     // Bytes >= 0x20 pass through, including UTF-8 continuation
                     // bytes. A partial multi-byte sequence (byte-level tokens
-                    // can produce one) stays as-is; the Go side accumulates
-                    // pieces before interpreting them as text.
+                    // can produce one) stays as-is here, but a JSON decoder
+                    // is free to replace it with U+FFFD, so results that
+                    // carry model-produced bytes also ship them as b64 (see
+                    // text_fields).
                     out.push_back((char) c);
                 }
         }
@@ -92,6 +94,17 @@ std::string b64_encode(const std::string &in) {
         out.push_back('=');
     }
     return out;
+}
+
+// text_fields renders model-produced bytes as a JSON "text" string plus a
+// "b64" copy of the same bytes. Byte-level tokenizers can emit a PARTIAL
+// UTF-8 sequence (one character split across tokens, or a byte-fallback
+// token on its own); a JSON string cannot carry that losslessly because
+// decoders substitute U+FFFD, while the token-sink callback hands the caller
+// the raw bytes. b64 lets the caller reconstruct exactly what the sink saw;
+// text stays for older consumers.
+std::string text_fields(const std::string &text) {
+    return "\"text\":" + json_str(text) + ",\"b64\":\"" + b64_encode(text) + "\"";
 }
 
 std::string json_num(double v) {
@@ -786,7 +799,7 @@ std::string llama_detokenize(uint64_t model, const char *tokens_json,
                 break;
             }
         }
-        return "{\"ok\":true,\"text\":" + json_str(text) + "}";
+        return "{\"ok\":true," + text_fields(text) + "}";
     } catch (const std::exception &e) {
         return json_err(std::string("detokenize: ") + e.what());
     } catch (...) {
@@ -801,11 +814,7 @@ std::string llama_token_to_piece(uint64_t model, int32_t token,
     try {
         const llama_vocab *vocab = llama_model_get_vocab(ms->model);
         const std::string piece = piece_of(vocab, (llama_token) token, render_special != 0);
-        // A byte-fallback token holds a PARTIAL UTF-8 sequence, which
-        // a JSON string cannot carry losslessly; b64 carries the raw
-        // bytes, text stays for older consumers.
-        return "{\"ok\":true,\"text\":" + json_str(piece) +
-               ",\"b64\":\"" + b64_encode(piece) + "\"}";
+        return "{\"ok\":true," + text_fields(piece) + "}";
     } catch (const std::exception &e) {
         return json_err(std::string("token_to_piece: ") + e.what());
     } catch (...) {
@@ -1102,7 +1111,7 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
         smpl = nullptr;
 
         std::string out = "{\"ok\":true";
-        out += ",\"text\":" + json_str(text);
+        out += "," + text_fields(text);
         out += ",\"tokens\":[";
         for (size_t i = 0; i < produced.size(); i++) {
             if (i != 0) out.push_back(',');
@@ -1431,7 +1440,7 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
         vb_init = false;
 
         std::string out = "{\"ok\":true";
-        out += ",\"text\":" + json_str(text);
+        out += "," + text_fields(text);
         out += ",\"tokens\":[";
         for (size_t i = 0; i < produced.size(); i++) {
             if (i != 0) out.push_back(',');
