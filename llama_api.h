@@ -132,12 +132,15 @@ std::string llama_tokenize(uint64_t model, const char *text, uint32_t text_len,
                            int32_t add_special, int32_t parse_special);
 
 /* Render tokens (a JSON array of ints) back to text:
- * `{"ok":true,"text":"..."}`. */
+ * `{"ok":true,"text":"...","b64":"..."}`. `b64` is the same bytes base64
+ * encoded: byte-level tokens can render to a partial UTF-8 sequence, which a
+ * JSON string cannot carry losslessly (decoders substitute U+FFFD). */
 std::string llama_detokenize(uint64_t model, const char *tokens_json,
                              uint32_t tokens_json_len, int32_t render_special);
 
-/* The text piece a single token renders to, as JSON `{"ok":true,"text":".."}`.
- * Byte-level tokens can render to invalid UTF-8 on their own; the caller is
+/* The text piece a single token renders to, as JSON
+ * `{"ok":true,"text":"..","b64":".."}`. Byte-level tokens can render to
+ * invalid UTF-8 on their own; `b64` carries the exact bytes and the caller is
  * expected to accumulate pieces. */
 std::string llama_token_to_piece(uint64_t model, int32_t token,
                                  int32_t render_special);
@@ -154,9 +157,10 @@ std::string llama_token_to_piece(uint64_t model, int32_t token,
  * host on the very thread that is generating, so there is nothing to
  * synchronise.
  *
- * Pieces concatenate to the "text" field of the result, except that a stop
- * string is delivered as it is decoded and only afterwards trimmed from the
- * returned text.
+ * Pieces concatenate, byte for byte, to the "b64" field of the result (the
+ * "text" field is the same bytes as a JSON string, which cannot carry a
+ * partial UTF-8 sequence losslessly), except that a stop string is delivered
+ * as it is decoded and only afterwards trimmed from the returned text.
  *
  * Abstract on purpose: wasmify emits a Go-implementable interface for a class
  * with an unimplemented pure virtual. */
@@ -172,8 +176,8 @@ public:
 
 /* Run generation and return JSON:
  *
- *   {"ok":true,"text":"...","tokens":[..],"n_prompt":N,"n_cached":N,
- *    "n_decoded":N,
+ *   {"ok":true,"text":"...","b64":"...","tokens":[..],"n_prompt":N,
+ *    "n_cached":N,"n_decoded":N,
  *    "stop_reason":"eos"|"length"|"stop"|"interrupted","interrupted":bool,
  *    "timings":{"prompt_ms":f,"decode_ms":f}}
  *
