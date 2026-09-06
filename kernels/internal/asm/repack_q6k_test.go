@@ -262,6 +262,6 @@ func TestX64Q6K8x8KernelGate(t *testing.T) {
 		asm += wrap("amd64", k.sym, k.frame, argBytes, "avx2", k.gen(k.sym, pool, true)+"\n"+pool.Emit())
 	}
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+kQuantRunSrc+q4Kx8RunSrc+q6Kx8RunSrc+q6Kx8Decls, q6Kx8RunTest)
+	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+kQuantRunSrc+q4Kx8RunSrc+q6Kx8RunSrc+q6Kx8Decls, q6Kx8RunTest, "GemvKernel", "dbg_gemv_q6_K_8x8", "GemmKernel", "dbg_gemm_q6_K_8x8")
 	runAmd64Gate(t, dir, ".", "TestGem[vm]Q6K", asm)
 }
