@@ -92,6 +92,14 @@ uint64_t llama_model_load_progress_addr();
  *   n_ctx           0 = the model's training context length
  *   n_batch         logical batch size
  *   n_ubatch        physical batch size
+ *   n_seq_max       sequences the context holds at once (default 1)
+ *   kv_unified      non-zero: the sequences share one KV buffer of n_ctx
+ *                   cells (llama_memory_seq_cp is then metadata, not a copy,
+ *                   which the batched llama_ctx_score_choices and a shared
+ *                   prompt prefix across slots lean on); zero (llama.cpp's
+ *                   default) gives each sequence its own stream of
+ *                   n_ctx / n_seq_max cells, cheaper attention for
+ *                   independent sequences
  *   n_threads       0 = 1; a single-threaded wasm build clamps to 1
  *   embeddings      non-zero puts the context in embedding mode
  *   rope_freq_base  RoPE base frequency override (0 = model default)
@@ -228,6 +236,71 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
                                            uint32_t params_json_len,
                                            int32_t n_draft,
                                            llama_wasm::token_sink *sink);
+
+/* ------------------------------------------------------------------- slots */
+
+/* Continuous batching, after llama.cpp's server: a task is a prompt plus
+ * sampling parameters; a slot runs one task on its own KV sequence; one
+ * update decodes a single batch drawn from every busy slot and samples each
+ * of them. The context must be created with n_seq_max = the number of slots
+ * (see llama_ctx_new's kv_unified for how they share the cache). While slots hold
+ * tasks the single-sequence entry points (generate, score, eval, embed,
+ * state save/load) refuse to run; llama_ctx_reset drops every task.
+ *
+ * llama_ctx_slots_post queues a task. `task_json` is llama_ctx_generate's
+ * params object plus a "prompt" string (cache_prompt is rejected; every
+ * task decodes its own sequence). The prompt is tokenized with
+ * add_special=true. A task whose prompt plus n_predict does not fit a
+ * sequence's window (n_ctx with kv_unified, n_ctx / n_seq_max without) is
+ * refused; n_predict -1 means the rest of the window. With kv_unified the
+ * busy slots also share the buffer, so a task launches only when its prompt
+ * plus n_predict fit next to what they may still write. Returns
+ * `{"ok":true,"id":N}`; ids start at 1. */
+std::string llama_ctx_slots_post(uint64_t ctx, const char *task_json,
+                                 uint32_t task_json_len);
+
+/* One scheduling step. Queued tasks are launched into idle slots, in order,
+ * while the head of the queue fits the cells the busy slots may still
+ * write. Then one batch is assembled — the pending token of every
+ * generating slot, then prompt chunks of the slots still decoding their
+ * prompt, up to n_batch tokens — decoded once, and every slot whose logits
+ * it carried is sampled. Returns
+ *
+ *   {"ok":true,"active":N,"queued":N,"events":[
+ *     {"id":N,"token":T,"text":"..","b64":".."},   // one produced token
+ *     {"id":N,"final":{...}},                       // task finished: the
+ *                                                   // object llama_ctx_generate
+ *                                                   // returns (n_cached is 0)
+ *     {"id":N,"error":"..."}]}                      // task failed
+ *
+ * A task's last event is its final or its error. With no busy slot and an
+ * empty queue the call decodes nothing and returns no events. A stop
+ * string is delivered as it is decoded and trimmed from the final text,
+ * as in llama_ctx_generate. */
+std::string llama_ctx_slots_update(uint64_t ctx);
+
+/* Drop a task. A queued task is removed silently (`{"ok":true,"queued":true}`);
+ * a busy one releases its slot and returns `{"ok":true,"queued":false,
+ * "final":{...}}` with stop_reason "interrupted", the text produced so far
+ * included. An unknown id is an error. */
+std::string llama_ctx_slots_cancel(uint64_t ctx, int32_t id);
+
+/* The system prompt shared by every task, after llama.cpp's server of old:
+ * decoded once into the last sequence, which it then occupies (one slot
+ * fewer for tasks), and copied into a task's sequence (llama_memory_seq_cp
+ * — metadata with kv_unified, a cell copy otherwise) whenever the task's
+ * prompt starts with the same tokens, so only the rest is decoded; the
+ * final's n_cached counts the reused tokens. Tokenized with
+ * add_special=true, so a task prompt should be the system prompt text
+ * followed by the rest. Refused while slots hold tasks; an empty text
+ * clears it and frees the sequence. Returns `{"ok":true,"n_tokens":N}`. */
+std::string llama_ctx_slots_system_prompt(uint64_t ctx, const char *text,
+                                          uint32_t text_len);
+
+/* `{"ok":true,"n_slots":N,"active":N,"queued":N,"n_ctx":N,"used":N}` —
+ * n_slots excludes the sequence a system prompt occupies; used is the
+ * cache cells the busy slots hold. */
+std::string llama_ctx_slots_status(uint64_t ctx);
 
 /* -------------------------------------------------------------------- lora */
 
