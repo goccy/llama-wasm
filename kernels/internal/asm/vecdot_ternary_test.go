@@ -298,7 +298,7 @@ func TestA64VecDotTernaryKernelGate(t *testing.T) {
 		wrap("arm64", "Q2Kernel", 16, argBytes, "dotprod", a64VecDotQ2_0Kernel("Q2Kernel", pool, true)) +
 		wrap("arm64", "NVKernel", 16, argBytes, "dotprod", a64VecDotNVFP4Kernel("NVKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+ternaryRunSrc+ternaryDecls, ternaryRunTest)
+	writeRunTree(t, dir, "quantrun", "arm64", asm, quantRunCommon+ternaryRunSrc+ternaryDecls, ternaryRunTest, "NVKernel", "dbg_vec_dot_nvfp4_q8_0", "Q1Kernel", "dbg_vec_dot_q1_0_q8_0", "Q2Kernel", "dbg_vec_dot_q2_0_q8_0", "TQ1Kernel", "dbg_vec_dot_tq1_0_q8_K", "TQ2Kernel", "dbg_vec_dot_tq2_0_q8_K")
 	runArm64Gate(t, dir, ".", "TestTernary", asm)
 }
 
@@ -311,6 +311,6 @@ func TestX64VecDotTernaryKernelGate(t *testing.T) {
 		wrap("amd64", "Q2Kernel", 16, argBytes, "avx2", x64VecDotQ2_0Kernel("Q2Kernel", pool, true)) +
 		wrap("amd64", "NVKernel", 16, argBytes, "avx2", x64VecDotNVFP4Kernel("NVKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+ternaryRunSrc+ternaryDecls, ternaryRunTest)
+	writeRunTree(t, dir, "quantrun", "amd64", asm, quantRunCommon+ternaryRunSrc+ternaryDecls, ternaryRunTest, "NVKernel", "dbg_vec_dot_nvfp4_q8_0", "Q1Kernel", "dbg_vec_dot_q1_0_q8_0", "Q2Kernel", "dbg_vec_dot_q2_0_q8_0", "TQ1Kernel", "dbg_vec_dot_tq1_0_q8_K", "TQ2Kernel", "dbg_vec_dot_tq2_0_q8_K")
 	runAmd64Gate(t, dir, ".", "TestTernary", asm)
 }
