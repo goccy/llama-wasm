@@ -588,6 +588,22 @@ std::string llama_ctx_lora_set(uint64_t ctx, const char *adapters_json,
 
 /* ---------------------------------------------------------------- context */
 
+namespace {
+
+// ctx_new_unwind releases what llama_ctx_new created before it threw:
+// the pool first (its workers joined; the context has not computed with
+// it yet, so nothing else refers to it), then the context.
+void ctx_new_unwind(llama_context *c, struct ggml_threadpool *tp) {
+#if defined(_REENTRANT)
+    if (tp != nullptr) ggml_threadpool_free(tp);
+#else
+    (void) tp;
+#endif
+    if (c != nullptr) llama_free(c);
+}
+
+} // namespace
+
 uint64_t llama_ctx_new(uint64_t model, const char *params_json,
                        uint32_t params_json_len) {
     set_error("");
@@ -596,6 +612,11 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
         set_error("null model handle");
         return 0;
     }
+    // Declared outside the try: what a throw after their creation must
+    // release (ctx_new_unwind), so a failed call leaves no context — and
+    // no pool with live worker threads — behind.
+    llama_context *c = nullptr;
+    struct ggml_threadpool *tp = nullptr;
     try {
         const char *json = params_json;
         const size_t len = params_json_len;
@@ -650,9 +671,8 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
         if (opt_num(json, len, "rope_freq_base", d))  cp.rope_freq_base  = (float) d;
         if (opt_num(json, len, "rope_freq_scale", d)) cp.rope_freq_scale = (float) d;
 
-        llama_context *c = llama_init_from_model(ms->model, cp);
+        c = llama_init_from_model(ms->model, cp);
 #if defined(_REENTRANT)
-        struct ggml_threadpool *tp = nullptr;
         if (c != nullptr && cp.n_threads > 1) {
             struct ggml_threadpool_params tpp =
                 ggml_threadpool_params_default(cp.n_threads);
@@ -685,9 +705,11 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
 #endif
         return reinterpret_cast<uint64_t>(st);
     } catch (const std::exception &e) {
+        ctx_new_unwind(c, tp);
         set_error(std::string("ctx_new: ") + e.what());
         return 0;
     } catch (...) {
+        ctx_new_unwind(c, tp);
         set_error("ctx_new: unknown error");
         return 0;
     }
