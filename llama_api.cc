@@ -697,11 +697,23 @@ void llama_ctx_free(uint64_t ctx) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return;
     if (st->ctx != nullptr) slots_free(st);
-    if (st->ctx != nullptr) llama_free(st->ctx);
 #if defined(_REENTRANT)
-    // Free the pool after the context: llama_free may still touch it.
-    if (st->threadpool != nullptr) ggml_threadpool_free(st->threadpool);
+    // Stop and join the pool BEFORE the context is freed. A worker that a
+    // trap on the main thread left waiting at a barrier inside an op is
+    // released by the stop and finishes that op's next phase, which reads
+    // the context's work buffer and writes its compute buffers; with the
+    // context already freed that is a write into memory the allocator may
+    // have handed to someone else. With the pool joined first the buffers
+    // are still live, and the garbage lands in memory freed right after.
+    // llama_free never touches the pool: the detach resets the backend's
+    // pointer while the pool is still alive to be paused.
+    if (st->ctx != nullptr) llama_detach_threadpool(st->ctx);
+    if (st->threadpool != nullptr) {
+        ggml_threadpool_free(st->threadpool);
+        st->threadpool = nullptr;
+    }
 #endif
+    if (st->ctx != nullptr) llama_free(st->ctx);
     delete st;
 }
 
