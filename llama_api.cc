@@ -1914,7 +1914,10 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
         dsmpl = llama_sampler_chain_init(dcp);
         llama_sampler_chain_add(dsmpl, llama_sampler_init_greedy());
 
+        // Either context's flag stops the generation: the caller may be
+        // closing the draft, which knows nothing of the target.
         st->interrupt = 0;
+        ds->interrupt = 0;
         st->generating = true;
 
         // Self-contained: both caches restart from the prompt, keeping the
@@ -1985,7 +1988,7 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
         }
 
         while (!done) {
-            if (st->interrupt != 0) {
+            if (st->interrupt != 0 || ds->interrupt != 0) {
                 interrupted = true;
                 stop_reason = "interrupted";
                 break;
