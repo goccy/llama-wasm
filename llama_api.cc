@@ -665,6 +665,11 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
             tp = ggml_threadpool_new(&tpp);
             if (tp != nullptr) {
                 llama_attach_threadpool(c, tp, tp);
+            } else {
+                // No pool (a worker could not be spawned): compute on one
+                // thread rather than let ggml try, and fail, to spawn a
+                // disposable pool for every graph.
+                llama_set_n_threads(c, 1, 1);
             }
         }
 #endif
@@ -706,6 +711,17 @@ uint64_t llama_ctx_interrupt_addr(uint64_t ctx) {
     return (uint64_t) (uintptr_t) &st->interrupt;
 }
 
+namespace {
+
+// threadpool_reply is the reply of the threadpool calls: the counts the
+// context now computes with.
+std::string threadpool_reply(const CtxState *st) {
+    return "{\"ok\":true,\"n_threads\":" + std::to_string(llama_n_threads(st->ctx)) +
+           ",\"n_threads_batch\":" + std::to_string(llama_n_threads_batch(st->ctx)) + "}";
+}
+
+} // namespace
+
 std::string llama_ctx_attach_threadpool(uint64_t ctx, uint32_t n_threads) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return json_err("null context handle");
@@ -741,8 +757,25 @@ std::string llama_ctx_attach_threadpool(uint64_t ctx, uint32_t n_threads) {
     (void) n_threads;
     st->threadpool = nullptr;
 #endif
-    return "{\"ok\":true,\"n_threads\":" + std::to_string(llama_n_threads(st->ctx)) +
-           ",\"n_threads_batch\":" + std::to_string(llama_n_threads_batch(st->ctx)) + "}";
+    return threadpool_reply(st);
+}
+
+std::string llama_ctx_free_threadpool(uint64_t ctx) {
+    CtxState *st = ctx_of(ctx);
+    if (st == nullptr) return json_err("null context handle");
+    if (st->ctx == nullptr) return json_err("free_threadpool: context is closed");
+#if defined(_REENTRANT)
+    // Detach before the free: the context must not hold a pointer to a pool
+    // that is gone, and llama_detach_threadpool takes the context back to
+    // ggml's disposable per-graph pools, which n_threads=1 never creates.
+    llama_detach_threadpool(st->ctx);
+    if (st->threadpool != nullptr) {
+        ggml_threadpool_free(st->threadpool);
+        st->threadpool = nullptr;
+    }
+#endif
+    llama_set_n_threads(st->ctx, 1, 1);
+    return threadpool_reply(st);
 }
 
 /* -------------------------------------------------------------- tokenizer */

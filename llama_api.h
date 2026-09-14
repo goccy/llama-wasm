@@ -131,6 +131,18 @@ uint64_t llama_ctx_interrupt_addr(uint64_t ctx);
    counts the context now computes with — or an error object. */
 std::string llama_ctx_attach_threadpool(uint64_t ctx, uint32_t n_threads);
 
+/* Stop and join the context's ggml threadpool, and leave the context
+   single-threaded (n_threads / n_threads_batch set to 1). The pool must be
+   one THIS instance created (by llama_ctx_new or
+   llama_ctx_attach_threadpool): joining a pool inherited from a snapshot
+   would wait for the builder's threads for ever. This is what a snapshot
+   builder calls on each context it keeps before the capture, so that its
+   own workers -- live threads of the building process -- are joined
+   rather than abandoned; a fork attaches a fresh pool afterwards. A
+   context without a pool is left as it is. Returns the same object as
+   llama_ctx_attach_threadpool, with both counts 1, or an error object. */
+std::string llama_ctx_free_threadpool(uint64_t ctx);
+
 /* -------------------------------------------------------------- tokenizer */
 
 /* Tokenize `text` and return JSON `{"ok":true,"tokens":[..]}`.
