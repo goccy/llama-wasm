@@ -699,14 +699,20 @@ void llama_ctx_free(uint64_t ctx) {
     if (st->ctx != nullptr) slots_free(st);
 #if defined(_REENTRANT)
     // Stop and join the pool BEFORE the context is freed. A worker that a
-    // trap on the main thread left waiting at a barrier inside an op is
-    // released by the stop and finishes that op's next phase, which reads
-    // the context's work buffer and writes its compute buffers; with the
-    // context already freed that is a write into memory the allocator may
-    // have handed to someone else. With the pool joined first the buffers
-    // are still live, and the garbage lands in memory freed right after.
-    // llama_free never touches the pool: the detach resets the backend's
-    // pointer while the pool is still alive to be paused.
+    // trap on the main thread left waiting at a barrier is released by the
+    // stop: at a barrier between nodes it leaves the graph at once; at a
+    // barrier inside an op it finishes that op's next phase, which reads
+    // the context's work buffer and writes its compute buffers. With the
+    // context already freed that phase would write into memory the
+    // allocator may have handed to someone else; with the pool joined
+    // first the buffers are still live. That phase computes on whatever
+    // the main thread left in the work buffer, so for an op whose second
+    // phase takes its row indices from there (mul_mat_id) the writes are
+    // not confined to the op's own buffers — a recovery this partial is
+    // still better than the join waiting for ever, which is what happened
+    // before, but a context whose graph was abandoned is only good for
+    // freeing. llama_free never touches the pool: the detach resets the
+    // backend's pointer while the pool is still alive to be paused.
     if (st->ctx != nullptr) llama_detach_threadpool(st->ctx);
     if (st->threadpool != nullptr) {
         ggml_threadpool_free(st->threadpool);
@@ -772,14 +778,34 @@ std::string llama_ctx_attach_threadpool(uint64_t ctx, uint32_t n_threads) {
     return threadpool_reply(st);
 }
 
+namespace {
+
+// dbg_trap_abort_cb is the abort callback llama_ctx_dbg_trap_next_graph
+// installs: a trap on its first call, on the main thread, mid-graph.
+bool dbg_trap_abort_cb(void * /*data*/) {
+    __builtin_trap();
+}
+
+} // namespace
+
+std::string llama_ctx_dbg_trap_next_graph(uint64_t ctx) {
+    CtxState *st = ctx_of(ctx);
+    if (st == nullptr) return json_err("null context handle");
+    if (st->ctx == nullptr) return json_err("dbg_trap_next_graph: context is closed");
+    llama_set_abort_callback(st->ctx, dbg_trap_abort_cb, nullptr);
+    return "{\"ok\":true}";
+}
+
 std::string llama_ctx_free_threadpool(uint64_t ctx) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return json_err("null context handle");
     if (st->ctx == nullptr) return json_err("free_threadpool: context is closed");
 #if defined(_REENTRANT)
-    // Detach before the free: the context must not hold a pointer to a pool
-    // that is gone, and llama_detach_threadpool takes the context back to
-    // ggml's disposable per-graph pools, which n_threads=1 never creates.
+    // Detach before the free: neither the context nor the CPU backend may
+    // hold a pointer to a pool that is gone (llama_detach_threadpool resets
+    // both, pausing the pool while it is still alive). The context is then
+    // back on ggml's disposable per-graph pools — with n_threads 1, a pool
+    // struct per graph and no threads.
     llama_detach_threadpool(st->ctx);
     if (st->threadpool != nullptr) {
         ggml_threadpool_free(st->threadpool);

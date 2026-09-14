@@ -139,9 +139,20 @@ std::string llama_ctx_attach_threadpool(uint64_t ctx, uint32_t n_threads);
    builder calls on each context it keeps before the capture, so that its
    own workers -- live threads of the building process -- are joined
    rather than abandoned; a fork attaches a fresh pool afterwards. A
-   context without a pool is left as it is. Returns the same object as
-   llama_ctx_attach_threadpool, with both counts 1, or an error object. */
+   context without a pool only has its counts set. Returns the same object
+   as llama_ctx_attach_threadpool, with both counts 1, or an error object. */
 std::string llama_ctx_free_threadpool(uint64_t ctx);
+
+/* Test scaffolding: make the NEXT graph computed on the context trap on
+   the main thread — through ggml's abort callback, which the main thread
+   runs after each node while the other threads of the pool wait for it at
+   the barrier — so the pool is left exactly as a mid-graph assertion
+   leaves it. What a host does with a context whose graph was abandoned
+   (llama_ctx_free must still join the pool's threads) is otherwise
+   untestable from outside. The callback stays installed; the context is
+   only good for freeing afterwards. Returns {"ok":true} or an error
+   object. */
+std::string llama_ctx_dbg_trap_next_graph(uint64_t ctx);
 
 /* -------------------------------------------------------------- tokenizer */
 

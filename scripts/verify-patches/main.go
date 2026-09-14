@@ -114,13 +114,16 @@ var registry = map[string]verification{
 	// The threadpool teardown changes are behavioural (a barrier that
 	// lets a pool being freed go, a failed worker spawn that frees the
 	// pool instead of aborting) inside functions with no export of their
-	// own; only a threads consumer can observe them. go-llama's fork
-	// close tests pin them against the released bundle: a fork closed
-	// after its graph was abandoned must join its workers, and a fork
-	// whose pool cannot be spawned must fail cleanly without leaking
-	// workers.
+	// own; only a threads consumer can observe them. go-llama pins them
+	// against the released bundle: TestForkCloseAfterTrap arms the
+	// bridge's llama_ctx_dbg_trap_next_graph, traps a generate on the
+	// main thread mid-graph and requires Close to join the workers and
+	// return; TestForkWithoutRoomForWorkersFailsCleanly caps a fork's
+	// memory at the image so the worker stacks cannot be allocated and
+	// requires Fork to fail with the engine's error, not a trap, leaving
+	// no worker behind.
 	"wasm-threadpool-free-after-abandoned-graph.patch": {
-		reason: "verified by go-llama's fork close tests against the released bundle",
+		reason: "verified by go-llama's TestForkCloseAfterTrap and TestForkWithoutRoomForWorkersFailsCleanly against the released bundle",
 	},
 	// llama_detach_threadpool also resets the CPU backend's pool pointer,
 	// so a pool freed after a detach is not paused (use after free) by the
