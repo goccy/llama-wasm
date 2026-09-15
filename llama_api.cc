@@ -1931,9 +1931,20 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
         ds->hist.clear();
         ds->hist_valid = false;
 
+        const char *stop_reason = "length";
+        bool interrupted = false;
+        // The interrupt flags are honoured between chunks, as in
+        // llama_ctx_generate, so a long prompt can be stopped; an
+        // interrupted prefill leaves the flag raised for the token loop
+        // below to see first thing.
         auto prefill = [&](CtxState *cs) -> bool {
             const int nb = (int) llama_n_batch(cs->ctx);
-            for (int off = 0; off < n_prompt; off += nb) {
+            for (int off = 0; off < n_prompt && !interrupted; off += nb) {
+                if (st->interrupt != 0 || ds->interrupt != 0) {
+                    interrupted = true;
+                    stop_reason = "interrupted";
+                    break;
+                }
                 const int take = std::min(nb, n_prompt - off);
                 if (llama_decode(cs->ctx, llama_batch_get_one(toks.data() + off, take)) != 0) {
                     return false;
@@ -1947,8 +1958,6 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
 
         std::string text;
         std::vector<llama_token> produced;
-        const char *stop_reason = "length";
-        bool interrupted = false;
         int n_drafted = 0, n_accepted = 0;
         int tpos = n_prompt; // target KV length in tokens
         int dpos = n_prompt; // draft KV length in tokens

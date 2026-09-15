@@ -252,7 +252,8 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
  * Self-contained: both contexts' caches restart from the prompt. The
  * response is llama_ctx_generate's plus `"n_drafted"` / `"n_accepted"`,
  * the speculation efficiency counters. Either context's interrupt flag
- * (llama_ctx_interrupt_addr) stops it; both are cleared when it starts. */
+ * (llama_ctx_interrupt_addr) stops it, between prompt chunks as between
+ * rounds; both are cleared when it starts. */
 std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
                                            const char *prompt,
                                            uint32_t prompt_len,
