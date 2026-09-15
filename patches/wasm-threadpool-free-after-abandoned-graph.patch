@@ -1,0 +1,68 @@
+--- a/ggml/src/ggml-cpu/ggml-cpu.c
++++ b/ggml/src/ggml-cpu/ggml-cpu.c
+@@ -601,6 +601,14 @@ void ggml_barrier(struct ggml_threadpool * tp) {
+ 
+     // wait for other threads
+     while (atomic_load_explicit(&tp->n_barrier_passed, memory_order_relaxed) == n_passed) {
++        // A pool being freed lets its waiters go: when the main thread has
++        // abandoned the graph (it trapped mid-compute and unwound past
++        // ggml_graph_compute), the other threads would otherwise wait here
++        // for a pass that never comes, and ggml_threadpool_free's join
++        // would wait on them for ever.
++        if (atomic_load_explicit(&tp->stop, memory_order_relaxed)) {
++            return;
++        }
+         ggml_thread_cpu_relax();
+     }
+ 
+@@ -3089,7 +3097,10 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
+     GGML_PRINT_DEBUG("thread #%d compute-start cplan %p last-graph %d\n", state->ith, (const void *)cplan, state->last_graph);
+ #endif
+ 
+-    for (int node_n = 0; node_n < cgraph->n_nodes && atomic_load_explicit(&tp->abort, memory_order_relaxed) != node_n; node_n++) {
++    // stop is checked before the graph is touched: a thread released from a
++    // barrier by a pool being freed must not compute on (or even read) a
++    // graph its main thread abandoned.
++    for (int node_n = 0; !atomic_load_explicit(&tp->stop, memory_order_relaxed) && node_n < cgraph->n_nodes && atomic_load_explicit(&tp->abort, memory_order_relaxed) != node_n; node_n++) {
+         struct ggml_tensor * node = cgraph->nodes[node_n];
+ 
+         if (ggml_op_is_empty(node->op)) {
+@@ -3330,7 +3341,25 @@ static struct ggml_threadpool * ggml_threadpool_new_impl(
+         ggml_thread_cpumask_next(tpp->cpumask, workers[j].cpumask, tpp->strict_cpu, &cpumask_iter);
+ 
+         int32_t rc = ggml_thread_create(&workers[j].thrd, NULL, ggml_graph_compute_secondary_thread, &workers[j]);
+-        GGML_ASSERT(rc == 0);
++        if (rc != 0) {
++            // A spawn can fail for lack of memory for the thread's stack
++            // (EAGAIN). Aborting here would orphan the workers spawned so
++            // far in a pool nobody holds; stop and join them instead, and
++            // hand back no pool, so the caller sees a failure it can act on.
++            ggml_mutex_lock(&threadpool->mutex);
++            threadpool->stop  = true;
++            threadpool->pause = false;
++            ggml_cond_broadcast(&threadpool->cond);
++            ggml_mutex_unlock(&threadpool->mutex);
++            for (int k = 1; k < j; k++) {
++                ggml_thread_join(workers[k].thrd, NULL);
++            }
++            ggml_mutex_destroy(&threadpool->mutex);
++            ggml_cond_destroy(&threadpool->cond);
++            ggml_aligned_free(workers, workers_size);
++            ggml_aligned_free(threadpool, sizeof(struct ggml_threadpool));
++            return NULL;
++        }
+     }
+ 
+     ggml_thread_cpumask_next(tpp->cpumask, workers[0].cpumask, tpp->strict_cpu, &cpumask_iter);
+@@ -3369,6 +3398,11 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
+ 
+         struct ggml_threadpool_params ttp = ggml_threadpool_params_default(n_threads);
+         threadpool = ggml_threadpool_new_impl(&ttp, cgraph, cplan);
++        if (threadpool == NULL) {
++            // The pool's workers could not be spawned (see
++            // ggml_threadpool_new_impl); nothing was left running.
++            return GGML_STATUS_ALLOC_FAILED;
++        }
+     } else {
+         // Reset some of the parameters that need resetting
+         // No worker threads should be accessing the parameters below at this stage

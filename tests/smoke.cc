@@ -196,6 +196,19 @@ int main(int argc, char **argv) {
         printf("last_error: %s\n", llama_wasm_last_error().c_str());
         return 1;
     }
+    {
+        // The threadpool calls on a single-threaded context: attach clamps
+        // to one thread in this build, free leaves the context as it is;
+        // both report the counts the context computes with.
+        std::string tp = llama_ctx_attach_threadpool(ctx, 1);
+        check(tp == "{\"ok\":true,\"n_threads\":1,\"n_threads_batch\":1}", "attach_threadpool reply");
+        tp = llama_ctx_free_threadpool(ctx);
+        check(tp == "{\"ok\":true,\"n_threads\":1,\"n_threads_batch\":1}", "free_threadpool reply");
+        check(!json_ok(llama_ctx_free_threadpool(0)), "free_threadpool rejects a null handle");
+        // Arming the trap on a real context would end this process at its
+        // next graph; only the handle check is exercised here.
+        check(!json_ok(llama_ctx_dbg_trap_next_graph(0)), "dbg_trap_next_graph rejects a null handle");
+    }
     printf("interrupt_addr: %" PRIu64 "\n", llama_ctx_interrupt_addr(ctx));
 
     const char *params = "{\"n_predict\":16,\"temperature\":0}";

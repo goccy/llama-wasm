@@ -111,6 +111,28 @@ var registry = map[string]verification{
 	"wasm-q8-repack-q5-0-kernels.patch": {
 		verify: hasExports("dbg_gemv_q5_0_8x8", "dbg_gemm_q5_0_8x8", "dbg_quantize_mat_q8_0_4x8"),
 	},
+	// The threadpool teardown changes are behavioural (a barrier that
+	// lets a pool being freed go, a failed worker spawn that frees the
+	// pool instead of aborting) inside functions with no export of their
+	// own; only a threads consumer can observe them. go-llama pins them
+	// against the released bundle: TestForkCloseAfterTrap arms the
+	// bridge's llama_ctx_dbg_trap_next_graph, traps a generate on the
+	// main thread mid-graph and requires Close to join the workers and
+	// return; TestForkWithoutRoomForWorkersFailsCleanly caps a fork's
+	// memory at the image so the worker stacks cannot be allocated and
+	// requires Fork to fail with the engine's error, not a trap, leaving
+	// no worker behind.
+	"wasm-threadpool-free-after-abandoned-graph.patch": {
+		reason: "verified by go-llama's TestForkCloseAfterTrap and TestForkWithoutRoomForWorkersFailsCleanly against the released bundle",
+	},
+	// llama_detach_threadpool also resets the CPU backend's pool pointer,
+	// so a pool freed after a detach is not paused (use after free) by the
+	// next compute. Behavioural; go-llama's snapshot tests fork from a
+	// builder that detached and freed its pool, and a fork's first
+	// generate hangs on the freed pool's mutex without it.
+	"wasm-detach-threadpool-resets-cpu-backend.patch": {
+		reason: "verified by go-llama's snapshot fork tests against the released bundle",
+	},
 }
 
 // hasExports checks that every name is exported by the module AND that

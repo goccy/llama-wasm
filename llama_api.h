@@ -131,6 +131,29 @@ uint64_t llama_ctx_interrupt_addr(uint64_t ctx);
    counts the context now computes with — or an error object. */
 std::string llama_ctx_attach_threadpool(uint64_t ctx, uint32_t n_threads);
 
+/* Stop and join the context's ggml threadpool, and leave the context
+   single-threaded (n_threads / n_threads_batch set to 1). The pool must be
+   one THIS instance created (by llama_ctx_new or
+   llama_ctx_attach_threadpool): joining a pool inherited from a snapshot
+   would wait for the builder's threads for ever. This is what a snapshot
+   builder calls on each context it keeps before the capture, so that its
+   own workers -- live threads of the building process -- are joined
+   rather than abandoned; a fork attaches a fresh pool afterwards. A
+   context without a pool only has its counts set. Returns the same object
+   as llama_ctx_attach_threadpool, with both counts 1, or an error object. */
+std::string llama_ctx_free_threadpool(uint64_t ctx);
+
+/* Test scaffolding: make the NEXT graph computed on the context trap on
+   the main thread — through ggml's abort callback, which the main thread
+   runs after each node while the other threads of the pool wait for it at
+   the barrier — so the pool is left exactly as a mid-graph assertion
+   leaves it. What a host does with a context whose graph was abandoned
+   (llama_ctx_free must still join the pool's threads) is otherwise
+   untestable from outside. The callback stays installed; the context is
+   only good for freeing afterwards. Returns {"ok":true} or an error
+   object. */
+std::string llama_ctx_dbg_trap_next_graph(uint64_t ctx);
+
 /* -------------------------------------------------------------- tokenizer */
 
 /* Tokenize `text` and return JSON `{"ok":true,"tokens":[..]}`.
@@ -228,7 +251,9 @@ std::string llama_ctx_generate(uint64_t ctx, const char *prompt,
  *
  * Self-contained: both contexts' caches restart from the prompt. The
  * response is llama_ctx_generate's plus `"n_drafted"` / `"n_accepted"`,
- * the speculation efficiency counters. */
+ * the speculation efficiency counters. Either context's interrupt flag
+ * (llama_ctx_interrupt_addr) stops it, between prompt chunks as between
+ * rounds; both are cleared when it starts. */
 std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
                                            const char *prompt,
                                            uint32_t prompt_len,

@@ -588,6 +588,22 @@ std::string llama_ctx_lora_set(uint64_t ctx, const char *adapters_json,
 
 /* ---------------------------------------------------------------- context */
 
+namespace {
+
+// ctx_new_unwind releases what llama_ctx_new created before it threw:
+// the pool first (its workers joined; the context has not computed with
+// it yet, so nothing else refers to it), then the context.
+void ctx_new_unwind(llama_context *c, struct ggml_threadpool *tp) {
+#if defined(_REENTRANT)
+    if (tp != nullptr) ggml_threadpool_free(tp);
+#else
+    (void) tp;
+#endif
+    if (c != nullptr) llama_free(c);
+}
+
+} // namespace
+
 uint64_t llama_ctx_new(uint64_t model, const char *params_json,
                        uint32_t params_json_len) {
     set_error("");
@@ -596,6 +612,11 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
         set_error("null model handle");
         return 0;
     }
+    // Declared outside the try: what a throw after their creation must
+    // release (ctx_new_unwind), so a failed call leaves no context — and
+    // no pool with live worker threads — behind.
+    llama_context *c = nullptr;
+    struct ggml_threadpool *tp = nullptr;
     try {
         const char *json = params_json;
         const size_t len = params_json_len;
@@ -650,9 +671,8 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
         if (opt_num(json, len, "rope_freq_base", d))  cp.rope_freq_base  = (float) d;
         if (opt_num(json, len, "rope_freq_scale", d)) cp.rope_freq_scale = (float) d;
 
-        llama_context *c = llama_init_from_model(ms->model, cp);
+        c = llama_init_from_model(ms->model, cp);
 #if defined(_REENTRANT)
-        struct ggml_threadpool *tp = nullptr;
         if (c != nullptr && cp.n_threads > 1) {
             struct ggml_threadpool_params tpp =
                 ggml_threadpool_params_default(cp.n_threads);
@@ -665,6 +685,11 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
             tp = ggml_threadpool_new(&tpp);
             if (tp != nullptr) {
                 llama_attach_threadpool(c, tp, tp);
+            } else {
+                // No pool (a worker could not be spawned): compute on one
+                // thread rather than let ggml try, and fail, to spawn a
+                // disposable pool for every graph.
+                llama_set_n_threads(c, 1, 1);
             }
         }
 #endif
@@ -680,9 +705,11 @@ uint64_t llama_ctx_new(uint64_t model, const char *params_json,
 #endif
         return reinterpret_cast<uint64_t>(st);
     } catch (const std::exception &e) {
+        ctx_new_unwind(c, tp);
         set_error(std::string("ctx_new: ") + e.what());
         return 0;
     } catch (...) {
+        ctx_new_unwind(c, tp);
         set_error("ctx_new: unknown error");
         return 0;
     }
@@ -692,11 +719,29 @@ void llama_ctx_free(uint64_t ctx) {
     CtxState *st = ctx_of(ctx);
     if (st == nullptr) return;
     if (st->ctx != nullptr) slots_free(st);
-    if (st->ctx != nullptr) llama_free(st->ctx);
 #if defined(_REENTRANT)
-    // Free the pool after the context: llama_free may still touch it.
-    if (st->threadpool != nullptr) ggml_threadpool_free(st->threadpool);
+    // Stop and join the pool BEFORE the context is freed. A worker that a
+    // trap on the main thread left waiting at a barrier is released by the
+    // stop: at a barrier between nodes it leaves the graph at once; at a
+    // barrier inside an op it finishes that op's next phase, which reads
+    // the context's work buffer and writes its compute buffers. With the
+    // context already freed that phase would write into memory the
+    // allocator may have handed to someone else; with the pool joined
+    // first the buffers are still live. That phase computes on whatever
+    // the main thread left in the work buffer, so for an op whose second
+    // phase takes its row indices from there (mul_mat_id) the writes are
+    // not confined to the op's own buffers — a recovery this partial is
+    // still better than the join waiting for ever, which is what happened
+    // before, but a context whose graph was abandoned is only good for
+    // freeing. llama_free never touches the pool: the detach resets the
+    // backend's pointer while the pool is still alive to be paused.
+    if (st->ctx != nullptr) llama_detach_threadpool(st->ctx);
+    if (st->threadpool != nullptr) {
+        ggml_threadpool_free(st->threadpool);
+        st->threadpool = nullptr;
+    }
 #endif
+    if (st->ctx != nullptr) llama_free(st->ctx);
     delete st;
 }
 
@@ -705,6 +750,17 @@ uint64_t llama_ctx_interrupt_addr(uint64_t ctx) {
     if (st == nullptr) return 0;
     return (uint64_t) (uintptr_t) &st->interrupt;
 }
+
+namespace {
+
+// threadpool_reply is the reply of the threadpool calls: the counts the
+// context now computes with.
+std::string threadpool_reply(const CtxState *st) {
+    return "{\"ok\":true,\"n_threads\":" + std::to_string(llama_n_threads(st->ctx)) +
+           ",\"n_threads_batch\":" + std::to_string(llama_n_threads_batch(st->ctx)) + "}";
+}
+
+} // namespace
 
 std::string llama_ctx_attach_threadpool(uint64_t ctx, uint32_t n_threads) {
     CtxState *st = ctx_of(ctx);
@@ -741,8 +797,45 @@ std::string llama_ctx_attach_threadpool(uint64_t ctx, uint32_t n_threads) {
     (void) n_threads;
     st->threadpool = nullptr;
 #endif
-    return "{\"ok\":true,\"n_threads\":" + std::to_string(llama_n_threads(st->ctx)) +
-           ",\"n_threads_batch\":" + std::to_string(llama_n_threads_batch(st->ctx)) + "}";
+    return threadpool_reply(st);
+}
+
+namespace {
+
+// dbg_trap_abort_cb is the abort callback llama_ctx_dbg_trap_next_graph
+// installs: a trap on its first call, on the main thread, mid-graph.
+bool dbg_trap_abort_cb(void * /*data*/) {
+    __builtin_trap();
+}
+
+} // namespace
+
+std::string llama_ctx_dbg_trap_next_graph(uint64_t ctx) {
+    CtxState *st = ctx_of(ctx);
+    if (st == nullptr) return json_err("null context handle");
+    if (st->ctx == nullptr) return json_err("dbg_trap_next_graph: context is closed");
+    llama_set_abort_callback(st->ctx, dbg_trap_abort_cb, nullptr);
+    return "{\"ok\":true}";
+}
+
+std::string llama_ctx_free_threadpool(uint64_t ctx) {
+    CtxState *st = ctx_of(ctx);
+    if (st == nullptr) return json_err("null context handle");
+    if (st->ctx == nullptr) return json_err("free_threadpool: context is closed");
+#if defined(_REENTRANT)
+    // Detach before the free: neither the context nor the CPU backend may
+    // hold a pointer to a pool that is gone (llama_detach_threadpool resets
+    // both, pausing the pool while it is still alive). The context is then
+    // back on ggml's disposable per-graph pools — with n_threads 1, a pool
+    // struct per graph and no threads.
+    llama_detach_threadpool(st->ctx);
+    if (st->threadpool != nullptr) {
+        ggml_threadpool_free(st->threadpool);
+        st->threadpool = nullptr;
+    }
+#endif
+    llama_set_n_threads(st->ctx, 1, 1);
+    return threadpool_reply(st);
 }
 
 /* -------------------------------------------------------------- tokenizer */
@@ -1821,7 +1914,10 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
         dsmpl = llama_sampler_chain_init(dcp);
         llama_sampler_chain_add(dsmpl, llama_sampler_init_greedy());
 
+        // Either context's flag stops the generation: the caller may be
+        // closing the draft, which knows nothing of the target.
         st->interrupt = 0;
+        ds->interrupt = 0;
         st->generating = true;
 
         // Self-contained: both caches restart from the prompt, keeping the
@@ -1835,9 +1931,20 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
         ds->hist.clear();
         ds->hist_valid = false;
 
+        const char *stop_reason = "length";
+        bool interrupted = false;
+        // The interrupt flags are honoured between chunks, as in
+        // llama_ctx_generate, so a long prompt can be stopped; an
+        // interrupted prefill leaves the flag raised for the token loop
+        // below to see first thing.
         auto prefill = [&](CtxState *cs) -> bool {
             const int nb = (int) llama_n_batch(cs->ctx);
-            for (int off = 0; off < n_prompt; off += nb) {
+            for (int off = 0; off < n_prompt && !interrupted; off += nb) {
+                if (st->interrupt != 0 || ds->interrupt != 0) {
+                    interrupted = true;
+                    stop_reason = "interrupted";
+                    break;
+                }
                 const int take = std::min(nb, n_prompt - off);
                 if (llama_decode(cs->ctx, llama_batch_get_one(toks.data() + off, take)) != 0) {
                     return false;
@@ -1851,8 +1958,6 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
 
         std::string text;
         std::vector<llama_token> produced;
-        const char *stop_reason = "length";
-        bool interrupted = false;
         int n_drafted = 0, n_accepted = 0;
         int tpos = n_prompt; // target KV length in tokens
         int dpos = n_prompt; // draft KV length in tokens
@@ -1860,7 +1965,7 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
         vb = llama_batch_init(n_draft + 1, 0, 1);
         vb_init = true;
 
-        bool done = budget == 0;
+        bool done = interrupted || budget == 0;
         // emit appends one target-sampled token to the result; false means
         // generation must stop here (stop string or budget).
         auto emit = [&](llama_token tok) -> bool {
@@ -1892,7 +1997,7 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
         }
 
         while (!done) {
-            if (st->interrupt != 0) {
+            if (st->interrupt != 0 || ds->interrupt != 0) {
                 interrupted = true;
                 stop_reason = "interrupted";
                 break;

@@ -1,0 +1,22 @@
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -1119,6 +1119,19 @@ void llama_context::detach_threadpool() {
+ 
+     this->threadpool       = nullptr;
+     this->threadpool_batch = nullptr;
++
++    // The CPU backend keeps the pool it last computed with and, on the next
++    // set_threadpool, pauses it before switching — a use after free once
++    // the detached pool has been freed. graph_compute only resets it before
++    // a graph; a detach that is followed by freeing the pool must reset it
++    // here, while the pool is still alive to be paused.
++    if (backend_cpu != nullptr) {
++        auto * reg = ggml_backend_dev_backend_reg(ggml_backend_get_device(backend_cpu));
++        auto * set_threadpool_fn = (decltype(ggml_backend_cpu_set_threadpool) *) ggml_backend_reg_get_proc_address(reg, "ggml_backend_cpu_set_threadpool");
++        if (set_threadpool_fn) {
++            set_threadpool_fn(backend_cpu, nullptr);
++        }
++    }
+ }
+ 
+ void llama_context::set_n_threads(int32_t n_threads, int32_t n_threads_batch) {
