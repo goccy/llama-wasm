@@ -1965,7 +1965,7 @@ std::string llama_ctx_generate_speculative(uint64_t ctx, uint64_t draft_ctx,
         vb = llama_batch_init(n_draft + 1, 0, 1);
         vb_init = true;
 
-        bool done = budget == 0;
+        bool done = interrupted || budget == 0;
         // emit appends one target-sampled token to the result; false means
         // generation must stop here (stop string or budget).
         auto emit = [&](llama_token tok) -> bool {
