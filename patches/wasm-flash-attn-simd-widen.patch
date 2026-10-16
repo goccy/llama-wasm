@@ -1,8 +1,8 @@
 diff --git a/ggml/src/ggml-cpu/ops.cpp b/ggml/src/ggml-cpu/ops.cpp
-index 42ec809ce..8056143fd 100644
+index 9a5bac5c1..a7e345f81 100644
 --- a/ggml/src/ggml-cpu/ops.cpp
 +++ b/ggml/src/ggml-cpu/ops.cpp
-@@ -8566,7 +8566,17 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
+@@ -9092,7 +9092,17 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
          ggml_fp16_t * VKQ16 = (ggml_fp16_t *) (VKQ32 + 1*DV); // (temporary) FP16 VKQ accumulator
          ggml_fp16_t * Q_q   = (ggml_fp16_t *) (VKQ32 + 2*DV); // (temporary) buffer for Q converted to quantized/FP16
  
@@ -21,7 +21,7 @@ index 42ec809ce..8056143fd 100644
              memset(VKQ16, 0, DV*sizeof(ggml_fp16_t));
          } else {
              memset(VKQ32, 0, DV*sizeof(float));
-@@ -8615,7 +8625,7 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
+@@ -9163,7 +9173,7 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
  
              const char * v_data = ((const char *) v->data + (ic*nbv1 + iv2*nbv2 + iv3*nbv3));
  
@@ -30,7 +30,7 @@ index 42ec809ce..8056143fd 100644
                  if (s > M) {
                      // s is new maximum, ms < 1.0f, vs == expf(s - s) == 1.0f
                      M = s;
-@@ -8644,6 +8654,11 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
+@@ -9192,6 +9202,11 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
                  }
  
                  // V += v*expf(s - M)
@@ -42,7 +42,7 @@ index 42ec809ce..8056143fd 100644
                  if (v_to_float) {
                      v_to_float(v_data, V32, DV);
                      ggml_vec_mad_f32(DV, VKQ32, V32, vs);
-@@ -8656,7 +8671,7 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
+@@ -9204,7 +9219,7 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
              S = S*ms + vs; // scale and increment sum with partial sum
          }
  
@@ -51,7 +51,7 @@ index 42ec809ce..8056143fd 100644
              for (int64_t d = 0; d < DV; ++d) {
                  VKQ32[d] = GGML_CPU_FP16_TO_FP32(VKQ16[d]);
              }
-@@ -8854,7 +8869,23 @@ static void ggml_compute_forward_flash_attn_ext_tiled(
+@@ -9402,7 +9417,23 @@ static void ggml_compute_forward_flash_attn_ext_tiled(
                  bool can_skip = true;
                  for (int tq = 0; tq < tile_rows; tq++) {
                      const ggml_fp16_t * mp_row = (const ggml_fp16_t *)((const char *) mask->data + (iq1 + tq)*mask->nb[1] + (iq2%mask->ne[2])*mask->nb[2] + (iq3%mask->ne[3])*mask->nb[3]);
@@ -76,7 +76,7 @@ index 42ec809ce..8056143fd 100644
                          mask32[tq * KV_TILE_SZ + tk] = slope * GGML_CPU_FP16_TO_FP32(mp_row[ic + tk]);
                          if (mask32[tq * KV_TILE_SZ + tk] != -INFINITY) {
                              can_skip = false;
-@@ -8873,7 +8904,38 @@ static void ggml_compute_forward_flash_attn_ext_tiled(
+@@ -9421,7 +9452,38 @@ static void ggml_compute_forward_flash_attn_ext_tiled(
  
              // Pack K tile transposed: K_f32[dk][kv] so KV_TILE is contiguous (SIMD dim)
              // Zero-pad the last tile so the GEMM always operates on KV_TILE_SZ columns
@@ -116,23 +116,11 @@ index 42ec809ce..8056143fd 100644
                  const char * k_data = (const char *)k->data + (ic + tk)*nbk1 + ik2*nbk2 + ik3*nbk3;
                  if (kv_type == GGML_TYPE_F16) {
                      const ggml_fp16_t * k_f16 = (const ggml_fp16_t *)k_data;
-@@ -8941,7 +9003,10 @@ static void ggml_compute_forward_flash_attn_ext_tiled(
-             for (int tk = 0; tk < kv_tile; tk++) {
-                 const char * v_data = (const char *)v->data + (ic + tk)*nbv1 + iv2*nbv2 + iv3*nbv3;
-                 if (kv_type == GGML_TYPE_F16) {
--                    ggml_fp16_to_fp32_row((const ggml_fp16_t *)v_data, V32 + tk * DV, DV);
-+                    // The CPU backend's converter (SIMD where the ISA
-+                    // has one, the transpiler-fusable idiom on wasm);
-+                    // ggml_fp16_to_fp32_row is the scalar generic.
-+                    ggml_cpu_fp16_to_fp32((const ggml_fp16_t *)v_data, V32 + tk * DV, DV);
-                 } else {
-                     memcpy(V32 + tk * DV, v_data, DV * sizeof(float));
-                 }
 diff --git a/ggml/src/ggml-cpu/simd-gemm.h b/ggml/src/ggml-cpu/simd-gemm.h
-index 2ebd10051..3d5d6a8d4 100644
+index 4b9396d54..aceef0fb4 100644
 --- a/ggml/src/ggml-cpu/simd-gemm.h
 +++ b/ggml/src/ggml-cpu/simd-gemm.h
-@@ -57,7 +57,17 @@ static inline void simd_gemm_ukernel(
+@@ -107,7 +107,17 @@ static inline void simd_gemm_ukernel_tail(
  }
  
  // C[M x N] += A[M x K] * B[K x N]

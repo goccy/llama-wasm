@@ -1056,7 +1056,7 @@ llama_sampler *build_sampler(const llama_vocab *vocab, const SamplingParams &sp)
     if (sp.repeat_penalty != 1.0f || sp.presence_penalty != 0.0f ||
         sp.frequency_penalty != 0.0f) {
         llama_sampler_chain_add(chain,
-            llama_sampler_init_penalties(sp.repeat_last_n, sp.repeat_penalty,
+            llama_sampler_init_penalties(n_vocab, sp.repeat_last_n, sp.repeat_penalty,
                                          sp.frequency_penalty, sp.presence_penalty));
     }
     // Temperature <= 0 means greedy: no truncation samplers, just argmax.
