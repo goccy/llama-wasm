@@ -1,0 +1,143 @@
+diff --git a/ggml/src/ggml-cpu/ggml-cpu.c b/ggml/src/ggml-cpu/ggml-cpu.c
+index 750add2d6..a227eef73 100644
+--- a/ggml/src/ggml-cpu/ggml-cpu.c
++++ b/ggml/src/ggml-cpu/ggml-cpu.c
+@@ -3517,6 +3517,9 @@ void ggml_cpu_fp32_to_fp32(const float * x, float * y, int64_t n) {
+     memcpy(y, x, n * sizeof(float));
+ }
+ 
++#if defined(__wasm__)
++__attribute__((noinline, export_name("dbg_cpu_fp32_to_fp16")))
++#endif
+ void ggml_cpu_fp32_to_fp16(const float * x, ggml_fp16_t * y, int64_t n) {
+     int64_t i = 0;
+ #if defined(__F16C__)
+@@ -3556,6 +3559,9 @@ void ggml_cpu_fp32_to_fp16(const float * x, ggml_fp16_t * y, int64_t n) {
+     }
+ }
+ 
++#if defined(__wasm__)
++__attribute__((noinline, export_name("dbg_cpu_fp16_to_fp32")))
++#endif
+ void ggml_cpu_fp16_to_fp32(const ggml_fp16_t * x, float * y, int64_t n) {
+     int64_t i = 0;
+ #if defined(__F16C__)
+diff --git a/ggml/src/ggml-cpu/ops.cpp b/ggml/src/ggml-cpu/ops.cpp
+index a7e345f81..a7d9c3aa1 100644
+--- a/ggml/src/ggml-cpu/ops.cpp
++++ b/ggml/src/ggml-cpu/ops.cpp
+@@ -9,6 +9,7 @@
+ #include "vec.h"
+ 
+ #include <algorithm>
++#include <type_traits>
+ #include <cfloat>
+ #include <cmath>
+ 
+@@ -115,6 +116,19 @@ static void ggml_compute_forward_dup_flt(
+                         id += ne00 * ir0;
+                         for (int i01 = ir0; i01 < ir1; i01++) {
+                             const src_t * src0_ptr = (src_t *) ((char *) src0->data + i01*nb01 + i02*nb02 + i03*nb03);
++#if defined(__wasm_simd128__)
++                            // Whole rows through the exported row converters.
++                            if constexpr (std::is_same_v<src_t, float> && std::is_same_v<dst_t, ggml_fp16_t>) {
++                                ggml_cpu_fp32_to_fp16(src0_ptr, dst_ptr + id, ne00);
++                                id += ne00;
++                                continue;
++                            }
++                            if constexpr (std::is_same_v<src_t, ggml_fp16_t> && std::is_same_v<dst_t, float>) {
++                                ggml_cpu_fp16_to_fp32(src0_ptr, dst_ptr + id, ne00);
++                                id += ne00;
++                                continue;
++                            }
++#endif
+                             for (int i00 = 0; i00 < ne00; i00++) {
+                                 float tmp = type_conversion_table<src_t>::to_f32(src0_ptr[i00]);
+                                 dst_ptr[id] = type_conversion_table<dst_t>::from_f32(tmp);
+@@ -4105,9 +4119,13 @@ static void ggml_compute_forward_norm_f32(
+                 if (nb00 == sizeof(float) && nb0 == sizeof(float)) {
+                     const float * xf = (const float *) x;
+ 
++#if defined(__wasm_simd128__)
++                    float mean = (float)(ggml_vec_sum_f64(ne00, xf)/ne00);
++#else
+                     float sum = 0.0;
+                     ggml_vec_sum_f32(ne00, &sum, xf);
+                     float mean = sum/ne00;
++#endif
+ 
+                     float * yf = (float *) y;
+                     float variance = 0;
+diff --git a/ggml/src/ggml-cpu/vec.cpp b/ggml/src/ggml-cpu/vec.cpp
+index d25b4c813..3573a5508 100644
+--- a/ggml/src/ggml-cpu/vec.cpp
++++ b/ggml/src/ggml-cpu/vec.cpp
+@@ -537,6 +537,9 @@ void ggml_vec_swiglu_f32(const int n, float * y, const float * x, const float *
+     }
+ }
+ 
++#if defined(__wasm_simd128__)
++__attribute__((noinline, export_name("dbg_vec_cvar_f32")))
++#endif
+ ggml_float ggml_vec_cvar_f32(const int n, float * y, const float * x, const float mean) {
+     int i = 0;
+     ggml_float sum = 0;
+@@ -603,6 +606,15 @@ ggml_float ggml_vec_cvar_f32(const int n, float * y, const float * x, const floa
+         vsum = __riscv_vfwredusum_vs_f32m2_f64m1(val, vsum, vl);
+     }
+     sum = (ggml_float)__riscv_vfmv_f_s_f64m1_f64(vsum);
++#elif defined(__wasm_simd128__)
++    const v128_t vmean = wasm_f32x4_splat(mean);
++    for (; i + 3 < n; i += 4) {
++        v128_t val = wasm_f32x4_sub(wasm_v128_load(x + i), vmean);
++        wasm_v128_store(y + i, val);
++        val = wasm_f32x4_mul(val, val);
++        sum += (ggml_float)((wasm_f32x4_extract_lane(val, 0) + wasm_f32x4_extract_lane(val, 1)) +
++                            (wasm_f32x4_extract_lane(val, 2) + wasm_f32x4_extract_lane(val, 3)));
++    }
+ #endif
+     for (; i < n; ++i) {
+         float val = x[i] - mean;
+@@ -613,6 +625,27 @@ ggml_float ggml_vec_cvar_f32(const int n, float * y, const float * x, const floa
+     return sum/n;
+ }
+ 
++// ggml_vec_sum_f64: the f64 sum of a float row, four lanes added in f32
++// and widened per group as ggml_vec_cvar_f32 does on NEON.
++#if defined(__wasm_simd128__)
++__attribute__((noinline, export_name("dbg_vec_sum_f32")))
++#endif
++ggml_float ggml_vec_sum_f64(const int n, const float * x) {
++    int i = 0;
++    ggml_float sum = 0;
++#if defined(__wasm_simd128__)
++    for (; i + 3 < n; i += 4) {
++        const v128_t val = wasm_v128_load(x + i);
++        sum += (ggml_float)((wasm_f32x4_extract_lane(val, 0) + wasm_f32x4_extract_lane(val, 1)) +
++                            (wasm_f32x4_extract_lane(val, 2) + wasm_f32x4_extract_lane(val, 3)));
++    }
++#endif
++    for (; i < n; ++i) {
++        sum += (ggml_float)x[i];
++    }
++    return sum;
++}
++
+ #if defined(__wasm_simd128__)
+ __attribute__((noinline, export_name("dbg_vec_soft_max_f32")))
+ #endif
+diff --git a/ggml/src/ggml-cpu/vec.h b/ggml/src/ggml-cpu/vec.h
+index f214b7a45..a82ea9255 100644
+--- a/ggml/src/ggml-cpu/vec.h
++++ b/ggml/src/ggml-cpu/vec.h
+@@ -1587,6 +1587,10 @@ inline static void ggml_vec_swiglu_bf16(const int n, ggml_bf16_t * y, const ggml
+ // out-of-line SIMD body (dbg_vec_geglu_erf_f32) a wasm-to-native
+ // transpiler swaps for a native kernel, the convention of ggml_vec_swiglu_f32.
+ void ggml_vec_geglu_erf_f32(const int n, float * y, const float * x, const float * g);
++// ggml_vec_sum_f64 lives in vec.cpp: the f64 sum of a float row, on wasm an
++// exported out-of-line SIMD body (dbg_vec_sum_f32), the convention of
++// ggml_vec_swiglu_f32. ggml_vec_cvar_f32 is exported the same way there.
++ggml_float ggml_vec_sum_f64(const int n, const float * x);
+ 
+ inline static void ggml_vec_geglu_erf_f16(const int n, ggml_fp16_t * y, const ggml_fp16_t * x, const ggml_fp16_t * g) {
+     for (int i = 0; i < n; ++i) {

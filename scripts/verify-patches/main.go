@@ -79,6 +79,11 @@ var registry = map[string]verification{
 	"wasm-vec-geglu-erf-kernel.patch": {
 		verify: hasExports("dbg_vec_geglu_erf_f32"),
 	},
+	// LayerNorm row sum/variance and the f16 row converters: exported
+	// retarget hooks, structural.
+	"wasm-vec-norm-cvt-kernels.patch": {
+		verify: hasExports("dbg_vec_sum_f32", "dbg_vec_cvar_f32", "dbg_cpu_fp32_to_fp16", "dbg_cpu_fp16_to_fp32"),
+	},
 	"wasm-q8-quantize-round-nearest.patch": {
 		reason: "verified by go-llama's native-parity and prompt batch-invariance tests against the released bundle",
 	},

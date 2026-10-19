@@ -55,6 +55,42 @@
       ]
     },
     {
+      "export": "dbg_vec_sum_f32",
+      "role": "op",
+      "quant": "f32",
+      "arches": [
+        "arm64",
+        "amd64"
+      ]
+    },
+    {
+      "export": "dbg_vec_cvar_f32",
+      "role": "op",
+      "quant": "f32",
+      "arches": [
+        "arm64",
+        "amd64"
+      ]
+    },
+    {
+      "export": "dbg_cpu_fp32_to_fp16",
+      "role": "op",
+      "quant": "f16",
+      "arches": [
+        "arm64",
+        "amd64"
+      ]
+    },
+    {
+      "export": "dbg_cpu_fp16_to_fp32",
+      "role": "op",
+      "quant": "f16",
+      "arches": [
+        "arm64",
+        "amd64"
+      ]
+    },
+    {
       "export": "dbg_vec_dot_f16",
       "role": "vec_dot",
       "quant": "f16",

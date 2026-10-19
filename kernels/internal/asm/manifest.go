@@ -170,6 +170,48 @@ func Overrides() *Manifest {
 				},
 			},
 			{
+				Export: "dbg_vec_sum_f32",
+				Role:   RoleOp,
+				Quant:  "f32",
+				Params: []string{"i32", "i64"},
+				Result: str("f64"),
+				Bodies: []Body{
+					body("dbg_vec_sum_f32", "arm64", "neon", 16, func(sym string, p *ConstPool) string { return a64VecSumKernel(sym, p, wide) }),
+					body("dbg_vec_sum_f32", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecSumKernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_vec_cvar_f32",
+				Role:   RoleOp,
+				Quant:  "f32",
+				Params: []string{"i32", "i64", "i64", "f32"},
+				Result: str("f64"),
+				Bodies: []Body{
+					body("dbg_vec_cvar_f32", "arm64", "neon", 16, func(sym string, p *ConstPool) string { return a64VecCvarKernel(sym, p, wide) }),
+					body("dbg_vec_cvar_f32", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecCvarKernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_cpu_fp32_to_fp16",
+				Role:   RoleOp,
+				Quant:  "f16",
+				Params: []string{"i64", "i64", "i64"},
+				Bodies: []Body{
+					body("dbg_cpu_fp32_to_fp16", "arm64", "neon", 16, func(sym string, p *ConstPool) string { return a64VecCvtF32ToF16Kernel(sym, p, wide) }),
+					body("dbg_cpu_fp32_to_fp16", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecCvtF32ToF16Kernel(sym, p, wide) }),
+				},
+			},
+			{
+				Export: "dbg_cpu_fp16_to_fp32",
+				Role:   RoleOp,
+				Quant:  "f16",
+				Params: []string{"i64", "i64", "i64"},
+				Bodies: []Body{
+					body("dbg_cpu_fp16_to_fp32", "arm64", "neon", 16, func(sym string, p *ConstPool) string { return a64VecCvtF16ToF32Kernel(sym, p, wide) }),
+					body("dbg_cpu_fp16_to_fp32", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecCvtF16ToF32Kernel(sym, p, wide) }),
+				},
+			},
+			{
 				Export: "dbg_vec_dot_f16",
 				Role:   RoleVecDot,
 				Quant:  "f16",
