@@ -39,6 +39,14 @@ var registry = map[string]verification{
 	"wasm-threads-graph-plan.patch": {
 		reason: "verified by go-llama's thread-scaling test against the released bundle",
 	},
+	// The UGM (SentencePiece unigram) tokenizer's byte fallback is a
+	// tokenizer property, not a structural one this tool can read off the
+	// binary; go-llama's ModernBERT tokenizer parity test pins it (a
+	// character without a piece must tokenize to its UTF-8 byte pieces,
+	// as SentencePiece does, instead of <unk>).
+	"ugm-byte-fallback.patch": {
+		reason: "verified by go-llama's ModernBERT tokenizer parity test against the released bundle",
+	},
 	// The q8_0 repack kernels change numeric routing, not a structural
 	// property this tool can read off the binary; their effect is pinned
 	// by go-llama's repack numeric tests, which run against every

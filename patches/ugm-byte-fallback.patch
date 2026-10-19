@@ -1,0 +1,61 @@
+diff --git a/src/llama-vocab.cpp b/src/llama-vocab.cpp
+index 9fd5b9ef3..b0f4535d3 100644
+--- a/src/llama-vocab.cpp
++++ b/src/llama-vocab.cpp
+@@ -977,6 +977,19 @@ struct llm_tokenizer_ugm : llm_tokenizer {
+         }
+ 
+         unknown_token_score = min_score - unknown_token_score_penalty;
++
++        // SentencePiece's byte_fallback: a model trained with it carries the 256
++        // byte pieces <0x00>..<0xFF>, and encodes every character that has no
++        // piece as the byte pieces of its UTF-8 bytes instead of <unk>.
++        byte_fallback = true;
++        for (int ch = 0; ch < 256 && byte_fallback; ++ch) {
++            static const char * hex = "0123456789ABCDEF";
++            const char buf[7] = { '<', '0', 'x', hex[ch >> 4], hex[ch & 15], '>', 0 };
++            const llama_token id = vocab.text_to_token(buf);
++            if (id == LLAMA_TOKEN_NULL || !vocab.is_byte(id)) {
++                byte_fallback = false;
++            }
++        }
+     }
+ 
+     // escaped space symbol - U+2581 (Lower One Eighth Block)
+@@ -996,6 +1009,9 @@ struct llm_tokenizer_ugm : llm_tokenizer {
+     float unknown_token_score_penalty = 10.0;
+     float unknown_token_score;
+ 
++    // the vocab has all 256 byte pieces: unknown characters become their UTF-8 bytes
++    bool byte_fallback = false;
++
+     struct naive_trie token_matcher;
+ };
+ 
+@@ -1098,16 +1114,25 @@ struct llm_tokenizer_ugm_session {
+ 
+         // now backtrack from the end to gather token ids of the best tokenization
+         // merge sequences of consecutive unknown tokens into single unknown tokens
++        // (with byte_fallback an unknown span becomes the byte pieces of its UTF-8
++        // bytes instead, as SentencePiece does; the output is reversed below, so
++        // the bytes of a span are pushed last to first)
+         bool is_prev_unknown = false;
++        size_t span_end = input_len;
+         for (struct best_tokenization & tokenization = tokenization_results[input_len]; ; tokenization = tokenization_results[tokenization.input_offset]) {
+             bool is_unknown = tokenization.token_id == vocab.token_unk();
+-            if (!(is_prev_unknown && is_unknown)) {
++            if (is_unknown && tokenizer.byte_fallback) {
++                for (size_t i = span_end; i > tokenization.input_offset; --i) {
++                    output.push_back(vocab.byte_to_token((uint8_t) normalized[i - 1]));
++                }
++            } else if (!(is_prev_unknown && is_unknown)) {
+                 output.push_back(tokenization.token_id);
+             }
+             if (tokenization.input_offset == 0) {
+                 break;
+             }
+             is_prev_unknown = is_unknown;
++            span_end = tokenization.input_offset;
+         }
+ 
+         // reverse the output since we added tokens starting from the end of the input
