@@ -74,6 +74,11 @@ var registry = map[string]verification{
 	"wasm-legacy-vec-dot-q4-1-q5-1-kernels.patch": {
 		verify: hasExports("dbg_vec_dot_q4_1_q8_1", "dbg_vec_dot_q5_1_q8_1"),
 	},
+	// The GeGLU-erf vector body (ModernBERT-family encoders' GLU) is an
+	// exported retarget hook like the SwiGLU one: structural.
+	"wasm-vec-geglu-erf-kernel.patch": {
+		verify: hasExports("dbg_vec_geglu_erf_f32"),
+	},
 	"wasm-q8-quantize-round-nearest.patch": {
 		reason: "verified by go-llama's native-parity and prompt batch-invariance tests against the released bundle",
 	},

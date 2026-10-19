@@ -160,6 +160,16 @@ func Overrides() *Manifest {
 				},
 			},
 			{
+				Export: "dbg_vec_geglu_erf_f32",
+				Role:   RoleOp,
+				Quant:  "f32",
+				Params: []string{"i32", "i64", "i64", "i64"},
+				Bodies: []Body{
+					body("dbg_vec_geglu_erf_f32", "arm64", "neon", 16, func(sym string, p *ConstPool) string { return a64VecGegluErfKernel(sym, p, wide) }),
+					body("dbg_vec_geglu_erf_f32", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64VecGegluErfKernel(sym, p, wide) }),
+				},
+			},
+			{
 				Export: "dbg_vec_dot_f16",
 				Role:   RoleVecDot,
 				Quant:  "f16",

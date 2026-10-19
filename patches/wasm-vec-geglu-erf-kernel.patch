@@ -1,0 +1,94 @@
+diff --git a/ggml/src/ggml-cpu/vec.h b/ggml/src/ggml-cpu/vec.h
+--- a/ggml/src/ggml-cpu/vec.h
++++ b/ggml/src/ggml-cpu/vec.h
+@@ -1583,12 +1583,10 @@
+     }
+ }
+ 
+-inline static void ggml_vec_geglu_erf_f32(const int n, float * y, const float * x, const float * g) {
+-    for (int i = 0; i < n; ++i) {
+-        float xi = x[i];
+-        y[i] = 0.5f * xi * (1.0f + erff(xi*SQRT_2_INV)) * g[i];
+-    }
+-}
++// ggml_vec_geglu_erf_f32 lives in vec.cpp: on wasm it is an exported,
++// out-of-line SIMD body (dbg_vec_geglu_erf_f32) a wasm-to-native
++// transpiler swaps for a native kernel, the convention of ggml_vec_swiglu_f32.
++void ggml_vec_geglu_erf_f32(const int n, float * y, const float * x, const float * g);
+ 
+ inline static void ggml_vec_geglu_erf_f16(const int n, ggml_fp16_t * y, const ggml_fp16_t * x, const ggml_fp16_t * g) {
+     for (int i = 0; i < n; ++i) {
+diff --git a/ggml/src/ggml-cpu/vec.cpp b/ggml/src/ggml-cpu/vec.cpp
+--- a/ggml/src/ggml-cpu/vec.cpp
++++ b/ggml/src/ggml-cpu/vec.cpp
+@@ -428,6 +428,70 @@
+ // out of line, so a wasm-to-native transpiler can swap the bodies for
+ // native kernels (the convention of the q8_0 repack GEMM); exported
+ // functions also stay out of line through binaryen's inliner.
++// ggml_vec_geglu_erf_f32: y = 0.5*x*(1 + erf(x/sqrt(2)))*g, the GeGLU of
++// ModernBERT-family encoders. The SIMD body computes erf as Abramowitz &
++// Stegun 7.1.26 (|error| <= 1.5e-7 over the reals, a float32 ulp of the
++// 1+erf the GELU multiplies by): with t = 1/(1 + p|z|),
++//   erf(|z|) = 1 - (a1 t + a2 t^2 + a3 t^3 + a4 t^4 + a5 t^5) exp(-z^2),
++// exp through ggml_v_expf, the sign copied back from z. The scalar tail
++// follows the same arithmetic (not libm erff) so the asm twin of this
++// body agrees with it lane for lane; on every other build the loop is
++// the libm form.
++#if defined(__wasm_simd128__)
++static inline float ggml_geglu_erf_poly_f32(float x, float g) {
++    const float z = x * SQRT_2_INV;
++    const float az = fabsf(z);
++    const float t = 1.0f / (1.0f + 0.3275911f * az);
++    const float poly = t * (0.254829592f + t * (-0.284496736f + t * (1.421413741f + t * (-1.453152027f + t * 1.061405429f))));
++    const float e = expf(-(az * az));
++    const float erfa = 1.0f - poly * e;
++    const float erf = z < 0.0f ? -erfa : erfa;
++    return 0.5f * x * (1.0f + erf) * g;
++}
++#endif
++
++#if defined(__wasm_simd128__)
++__attribute__((noinline, export_name("dbg_vec_geglu_erf_f32")))
++#endif
++void ggml_vec_geglu_erf_f32(const int n, float * y, const float * x, const float * g) {
++    int i = 0;
++#if defined(__wasm_simd128__)
++    const v128_t half = wasm_f32x4_splat(0.5f);
++    const v128_t one  = wasm_f32x4_splat(1.0f);
++    const v128_t s2i  = wasm_f32x4_splat(SQRT_2_INV);
++    const v128_t p    = wasm_f32x4_splat(0.3275911f);
++    const v128_t a1   = wasm_f32x4_splat(0.254829592f);
++    const v128_t a2   = wasm_f32x4_splat(-0.284496736f);
++    const v128_t a3   = wasm_f32x4_splat(1.421413741f);
++    const v128_t a4   = wasm_f32x4_splat(-1.453152027f);
++    const v128_t a5   = wasm_f32x4_splat(1.061405429f);
++    const v128_t sign = wasm_i32x4_splat((int32_t) 0x80000000);
++    for (; i + 3 < n; i += 4) {
++        const v128_t xv = wasm_v128_load(x + i);
++        const v128_t z  = wasm_f32x4_mul(xv, s2i);
++        const v128_t az = wasm_f32x4_abs(z);
++        const v128_t t  = wasm_f32x4_div(one, wasm_f32x4_add(one, wasm_f32x4_mul(p, az)));
++        const v128_t poly = wasm_f32x4_mul(t, wasm_f32x4_add(a1, wasm_f32x4_mul(t, wasm_f32x4_add(a2,
++                                wasm_f32x4_mul(t, wasm_f32x4_add(a3, wasm_f32x4_mul(t, wasm_f32x4_add(a4,
++                                wasm_f32x4_mul(t, a5)))))))));
++        const v128_t e    = ggml_v_expf(wasm_f32x4_neg(wasm_f32x4_mul(az, az)));
++        const v128_t erfa = wasm_f32x4_sub(one, wasm_f32x4_mul(poly, e));
++        const v128_t erf  = wasm_v128_or(erfa, wasm_v128_and(z, sign));
++        const v128_t yv   = wasm_f32x4_mul(wasm_f32x4_mul(wasm_f32x4_mul(half, xv), wasm_f32x4_add(one, erf)),
++                                           wasm_v128_load(g + i));
++        wasm_v128_store(y + i, yv);
++    }
++    for (; i < n; ++i) {
++        y[i] = ggml_geglu_erf_poly_f32(x[i], g[i]);
++    }
++#else
++    for (; i < n; ++i) {
++        float xi = x[i];
++        y[i] = 0.5f * xi * (1.0f + erff(xi*SQRT_2_INV)) * g[i];
++    }
++#endif
++}
++
+ #if defined(__wasm_simd128__)
+ __attribute__((noinline, export_name("dbg_vec_swiglu_f32")))
+ #endif

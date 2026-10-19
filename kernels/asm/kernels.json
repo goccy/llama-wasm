@@ -46,6 +46,15 @@
       ]
     },
     {
+      "export": "dbg_vec_geglu_erf_f32",
+      "role": "op",
+      "quant": "f32",
+      "arches": [
+        "arm64",
+        "amd64"
+      ]
+    },
+    {
       "export": "dbg_vec_dot_f16",
       "role": "vec_dot",
       "quant": "f16",
