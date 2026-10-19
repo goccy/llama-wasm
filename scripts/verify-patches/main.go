@@ -31,6 +31,14 @@ type verification struct {
 }
 
 var registry = map[string]verification{
+	// Upstream c6f6a92c5 clamps ggml_graph_plan to one thread on every
+	// __wasi__ target; the wasip1-threads build (which defines
+	// _REENTRANT) must keep the requested count or every graph runs on
+	// one core. A thread-count property, not a structural one: go-llama's
+	// thread-scaling test pins it against the released bundle.
+	"wasm-threads-graph-plan.patch": {
+		reason: "verified by go-llama's thread-scaling test against the released bundle",
+	},
 	// The q8_0 repack kernels change numeric routing, not a structural
 	// property this tool can read off the binary; their effect is pinned
 	// by go-llama's repack numeric tests, which run against every
