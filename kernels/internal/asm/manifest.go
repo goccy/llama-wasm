@@ -253,6 +253,16 @@ func Overrides() *Manifest {
 				},
 			},
 			{
+				Export: "dbg_quantize_mat_q8_0_4x4",
+				Role:   RoleQuantizeMat,
+				Quant:  "q8_0",
+				Params: []string{"i64", "i64", "i64"},
+				Bodies: []Body{
+					body("dbg_quantize_mat_q8_0_4x4", "arm64", "neon", 16, func(sym string, _ *ConstPool) string { return a64QuantizeMatQ8_0_4x4Kernel(sym, wide) }),
+					body("dbg_quantize_mat_q8_0_4x4", "amd64", "avx2", 16, func(sym string, p *ConstPool) string { return x64QuantizeMatQ8_0_4x4Kernel(sym, p, wide) }),
+				},
+			},
+			{
 				Export: "dbg_gemv_iq4_nl_8x8",
 				Role:   RoleGemv,
 				Quant:  "iq4_nl",

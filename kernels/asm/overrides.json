@@ -366,6 +366,29 @@
       ]
     },
     {
+      "export": "dbg_quantize_mat_q8_0_4x4",
+      "params": [
+        "i64",
+        "i64",
+        "i64"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "neon",
+          "frame": 16,
+          "file": "dbg_quantize_mat_q8_0_4x4_arm64_neon.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_quantize_mat_q8_0_4x4_amd64_avx2.s"
+        }
+      ]
+    },
+    {
       "export": "dbg_gemv_iq4_nl_8x8",
       "params": [
         "i32",

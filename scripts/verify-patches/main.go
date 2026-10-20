@@ -84,6 +84,11 @@ var registry = map[string]verification{
 	"wasm-vec-norm-cvt-kernels.patch": {
 		verify: hasExports("dbg_vec_sum_f32", "dbg_vec_cvar_f32", "dbg_cpu_fp32_to_fp16", "dbg_cpu_fp16_to_fp32"),
 	},
+	// The 4-wide q8_0 activation quantizer: exported retarget hook,
+	// structural.
+	"wasm-q8-repack-quantize-4x4-export.patch": {
+		verify: hasExports("dbg_quantize_mat_q8_0_4x4"),
+	},
 	"wasm-q8-quantize-round-nearest.patch": {
 		reason: "verified by go-llama's native-parity and prompt batch-invariance tests against the released bundle",
 	},

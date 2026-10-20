@@ -127,6 +127,15 @@
       ]
     },
     {
+      "export": "dbg_quantize_mat_q8_0_4x4",
+      "role": "quantize_mat",
+      "quant": "q8_0",
+      "arches": [
+        "arm64",
+        "amd64"
+      ]
+    },
+    {
       "export": "dbg_gemv_iq4_nl_8x8",
       "role": "gemv",
       "quant": "iq4_nl",

@@ -1,0 +1,15 @@
+diff --git a/ggml/src/ggml-cpu/arch/wasm/repack.cpp b/ggml/src/ggml-cpu/arch/wasm/repack.cpp
+index 0a68c7fef..194e4ce8d 100644
+--- a/ggml/src/ggml-cpu/arch/wasm/repack.cpp
++++ b/ggml/src/ggml-cpu/arch/wasm/repack.cpp
+@@ -59,6 +59,10 @@ static inline v128_t repack_scale_vec(const ggml_half * d, float da) {
+ // pairs, then i16x8 -> i8x16 gives [row0 4B][row1 4B][row2 4B][row3
+ // 4B] — exactly the 16-byte group layout — for ONE store per group.
+ __attribute__((noinline))
++// The 4-wide interleave feeding the i8mm q8_0 repack GEMM: qs[16j + 4m]
++// holds four consecutive elements of row m. Exported so a wasm-to-native
++// transpiler can substitute a native body.
++__attribute__((noinline, export_name("dbg_quantize_mat_q8_0_4x4")))
+ void ggml_quantize_mat_q8_0_4x4(const float * GGML_RESTRICT x, void * GGML_RESTRICT vy, int64_t k) {
+     assert(QK8_0 == 32);
+     assert(k % QK8_0 == 0);
