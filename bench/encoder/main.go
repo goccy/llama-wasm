@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"time"
@@ -34,7 +35,19 @@ func main() {
 	tokens := flag.String("tokens", "32,128,512", "comma-separated token counts")
 	reps := flag.Int("reps", 5, "timed repetitions per setting (after 2 warm-ups)")
 	jsonOut := flag.String("json", "", "write results as a JSON array to this file")
+	cpuProfile := flag.String("cpuprofile", "", "write a CPU profile of the timed passes to this file")
 	flag.Parse()
+	fmt.Println("features:", features())
+	if *cpuProfile != "" {
+		f, err := os.Create(*cpuProfile)
+		if err != nil {
+			fail(err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			fail(err)
+		}
+		defer pprof.StopCPUProfile()
+	}
 	if *model == "" {
 		fmt.Fprintln(os.Stderr, "encoder: -model is required")
 		os.Exit(2)

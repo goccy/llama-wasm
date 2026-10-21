@@ -393,10 +393,32 @@ jobs:
         run: |
           native/llama-bench -m "$MODEL_PATH" -p 32,128,512 -n 0 -t 1,4 -r 5 -embd 1 -ub 1024 -b 1024 -o json 2>/dev/null > native.json
           native/llama-bench -m "$MODEL_PATH" -p 32,128,512 -n 0 -t 1,4 -r 5 -embd 1 -ub 1024 -b 1024 2>/dev/null
-      - name: go-llama encoder pass
+      - name: Build the encoder benchmark
         working-directory: bench/encoder
-        run: go run . -model "$GITHUB_WORKSPACE/$MODEL_PATH" -threads 1,4 -tokens 32,128,512 -reps 5 -json "$GITHUB_WORKSPACE/encoder.json"
+        run: go build -o "$GITHUB_WORKSPACE/encoder-bin" .
+      - name: go-llama probe (one 32-token pass, profiled)
+        # A short pass first: its profile goes to the log, and the full
+        # matrix below is skipped when the pass is far slower than it
+        # should be (a broken dispatch would otherwise run for hours).
+        timeout-minutes: 15
+        run: |
+          ./encoder-bin -model "$MODEL_PATH" -threads 1 -tokens 32 -reps 1 -json probe.json -cpuprofile probe.prof
+          go tool pprof -top -nodecount=45 ./encoder-bin probe.prof 2>/dev/null | head -60
+          ms=$(python3 -c 'import json; print(int(json.load(open("probe.json"))[0]["avg_ms"]))')
+          echo "probe_ms=$ms" >> "$GITHUB_OUTPUT"
+          echo "probe: $ms ms for 32 tokens, 1 thread"
+        id: probe
+      - name: go-llama probe with asynchronous preemption off
+        if: steps.probe.outputs.probe_ms > 2000
+        timeout-minutes: 15
+        env:
+          GODEBUG: asyncpreemptoff=1
+        run: ./encoder-bin -model "$MODEL_PATH" -threads 1 -tokens 32 -reps 1
+      - name: go-llama encoder pass
+        if: steps.probe.outputs.probe_ms <= 2000
+        run: ./encoder-bin -model "$MODEL_PATH" -threads 1,4 -tokens 32,128,512 -reps 5 -json encoder.json
       - name: Summary
+        if: steps.probe.outputs.probe_ms <= 2000
         run: python3 bench/encoder/summary.py encoder.json native.json "encoder on ${{ matrix.os }} (${{ steps.cpu.outputs.model }})"
       - uses: actions/upload-artifact@v4
         if: always()
@@ -405,3 +427,6 @@ jobs:
           path: |
             encoder.json
             native.json
+            probe.json
+            probe.prof
+            encoder-bin
