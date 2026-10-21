@@ -30,6 +30,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      hf_model:
+        description: Hugging Face model the encoder benchmark converts and runs
+        default: sbintuitions/modernbert-ja-310m
+        type: string
 
 permissions:
   contents: read           # build-only: no release asset upload here
@@ -312,3 +317,141 @@ jobs:
         if: github.event_name == 'push' && github.event.repository.visibility == 'public'
         with:
           subject-checksums: release/llama_wasm2go.sha256
+
+  # Encoder throughput of the bundle against a native llama.cpp build of
+  # the same submodule commit, back to back on the same runner, on both
+  # architectures: one encoder pass (embeddings) at 32/128/512 tokens with
+  # 1 and 4 threads (the runners have 4 cores). The model is the public
+  # sbintuitions/modernbert-ja-310m converted to Q8_0 by
+  # bench/encoder/convert.py, cached by model, type, converter and
+  # submodule commit. Reported in the step summary, not gated.
+  bench-encoder:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goamd64: v2
+          - os: ubuntu-24.04-arm
+            goamd64: ""
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      # The amd64 bundle carries its assembly only under GOAMD64=v2 or
+      # higher; at v1 every vector helper is the scalar Go fallback.
+      GOAMD64: ${{ matrix.goamd64 }}
+      HF_MODEL: ${{ inputs.hf_model || 'sbintuitions/modernbert-ja-310m' }}
+      FTYPE: q8_0
+      MODEL_PATH: bench/encoder/model/encoder-q8_0.gguf
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: bench/encoder/go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: llama-wasm-${{ github.sha }}
+          path: release
+      - name: Unpack the bundle where bench/encoder/go.mod replaces it in
+        run: |
+          mkdir -p build/wasm2go/internal/wasm2go
+          tar -xzf release/llama_wasm2go.tar.gz -C build/wasm2go/internal/wasm2go
+          test -f build/wasm2go/internal/wasm2go/go.mod
+      - name: Runner CPU
+        id: cpu
+        run: |
+          model=$(lscpu | awk -F: '/Model name/ {gsub(/^ +/, "", $2); print $2; exit}')
+          echo "model=${model:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "cpu: ${model:-unknown} ($(nproc) cores)"
+          lscpu | grep -oE '\b(avx2|avx512f|avx512_vnni|avx_vnni|asimd|i8mm|sve)\b' | sort -u | tr '\n' ' '; echo
+          echo "GOAMD64=$(go env GOAMD64)"
+      - name: Submodule commit
+        id: sub
+        run: echo "sha=$(git -C llama.cpp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Cache the converted model
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.MODEL_PATH }}
+          key: encoder-model-${{ env.HF_MODEL }}-${{ env.FTYPE }}-${{ steps.sub.outputs.sha }}-${{ hashFiles('bench/encoder/convert.py') }}
+      - uses: actions/setup-python@v5
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.12"
+      - name: Convert the model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: |
+          python -m pip install -q -r llama.cpp/requirements/requirements-convert_hf_to_gguf.txt
+          hf download "$HF_MODEL" --local-dir hf-model
+          mkdir -p "$(dirname "$MODEL_PATH")"
+          python bench/encoder/convert.py llama.cpp hf-model "$MODEL_PATH" "$FTYPE"
+      - name: Cache native llama-bench
+        id: native-cache
+        uses: actions/cache@v4
+        with:
+          path: native/llama-bench
+          key: encoder-llama-bench-${{ steps.sub.outputs.sha }}-${{ matrix.os }}
+      - name: Build native llama-bench
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        run: |
+          cmake -S llama.cpp -B native/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+            -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF \
+            -DLLAMA_BUILD_TOOLS=ON >/dev/null
+          cmake --build native/build --target llama-bench -j "$(nproc)" 2>&1 | tail -2
+          mkdir -p native && cp native/build/bin/llama-bench native/llama-bench
+      - name: Native llama-bench
+        run: |
+          native/llama-bench -m "$MODEL_PATH" -p 32,128,512 -n 0 -t 1,4 -r 5 -embd 1 -ub 1024 -b 1024 -o json 2>/dev/null > native.json
+          native/llama-bench -m "$MODEL_PATH" -p 32,128,512 -n 0 -t 1,4 -r 5 -embd 1 -ub 1024 -b 1024 2>/dev/null
+      - name: Build the encoder benchmark
+        working-directory: bench/encoder
+        run: go build -o "$GITHUB_WORKSPACE/encoder-bin" .
+      - name: go-llama probe (one 32-token pass, profiled)
+        # A short pass first: its profile goes to the log, and the full
+        # matrix below is skipped when the pass is far slower than it
+        # should be (a broken dispatch would otherwise run for hours).
+        timeout-minutes: 15
+        run: |
+          ./encoder-bin -model "$MODEL_PATH" -threads 1 -tokens 32 -reps 1 -json probe.json -cpuprofile probe.prof
+          go tool pprof -top -nodecount=45 ./encoder-bin probe.prof 2>/dev/null | head -60
+          ms=$(python3 -c 'import json; print(int(json.load(open("probe.json"))[0]["avg_ms"]))')
+          echo "probe_ms=$ms" >> "$GITHUB_OUTPUT"
+          echo "probe: $ms ms for 32 tokens, 1 thread"
+        id: probe
+      - name: go-llama probe with asynchronous preemption off
+        if: steps.probe.outputs.probe_ms > 2000
+        timeout-minutes: 15
+        env:
+          GODEBUG: asyncpreemptoff=1
+        run: ./encoder-bin -model "$MODEL_PATH" -threads 1 -tokens 32 -reps 1
+      - name: go-llama encoder pass
+        if: steps.probe.outputs.probe_ms <= 2000
+        run: ./encoder-bin -model "$MODEL_PATH" -threads 1,4 -tokens 32,128,512 -reps 5 -json encoder.json
+      - name: go-llama profiled pass (512 tokens, 1 thread)
+        if: steps.probe.outputs.probe_ms <= 2000
+        run: |
+          ./encoder-bin -model "$MODEL_PATH" -threads 1 -tokens 512 -reps 3 -cpuprofile pass512-t1.prof
+          go tool pprof -top -nodecount=30 ./encoder-bin pass512-t1.prof 2>/dev/null | head -40
+      - name: go-llama profiled pass (512 tokens, 4 threads)
+        if: steps.probe.outputs.probe_ms <= 2000
+        run: |
+          ./encoder-bin -model "$MODEL_PATH" -threads 4 -tokens 512 -reps 3 -cpuprofile pass512-t4.prof
+          go tool pprof -top -nodecount=30 ./encoder-bin pass512-t4.prof 2>/dev/null | head -40
+      - name: Summary
+        if: steps.probe.outputs.probe_ms <= 2000
+        run: python3 bench/encoder/summary.py encoder.json native.json "$HF_MODEL $FTYPE on ${{ matrix.os }} (${{ steps.cpu.outputs.model }})"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-encoder-${{ matrix.os }}
+          path: |
+            encoder.json
+            native.json
+            probe.json
+            probe.prof
+            pass512-t1.prof
+            pass512-t4.prof
+            encoder-bin

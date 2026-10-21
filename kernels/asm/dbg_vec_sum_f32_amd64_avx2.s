@@ -1,0 +1,50 @@
+// dbg_vec_sum_f32: returns sum(x) (f64).
+	VXORPS	X15, X15, X15
+	MOVLQSX	l0+8(FP), CX
+	TESTQ	CX, CX
+	JLE	vsdone
+	MOVQ	l1+16(FP), SI
+	LEAQ	(SI)(CX*4), R8
+	CMPQ	R15, R8
+	JCS	vsoob
+	ADDQ	R14, SI
+vsloop8:
+	CMPQ	CX, $8
+	JLT	vsloop4
+	VMOVUPS	(SI), Y0
+	VHADDPS	Y0, Y0, Y0
+	VHADDPS	Y0, Y0, Y0
+	VCVTSS2SD	X0, X0, X1
+	VADDSD	X1, X15, X15
+	VEXTRACTF128	$1, Y0, X0
+	VCVTSS2SD	X0, X0, X1
+	VADDSD	X1, X15, X15
+	ADDQ	$32, SI
+	SUBQ	$8, CX
+	JMP	vsloop8
+vsloop4:
+	CMPQ	CX, $4
+	JLT	vstail
+	VMOVUPS	(SI), X0
+	VHADDPS	X0, X0, X0
+	VHADDPS	X0, X0, X0
+	VCVTSS2SD	X0, X0, X1
+	VADDSD	X1, X15, X15
+	ADDQ	$16, SI
+	SUBQ	$4, CX
+	JMP	vsloop4
+vstail:
+	TESTQ	CX, CX
+	JZ	vsdone
+	VMOVSS	(SI), X0
+	VCVTSS2SD	X0, X0, X0
+	VADDSD	X0, X15, X15
+	ADDQ	$4, SI
+	SUBQ	$1, CX
+	JMP	vstail
+vsdone:
+	VMOVSD	X15, r0+24(FP)
+	VZEROUPPER
+	RET
+vsoob:
+	JMP	ovr_oob

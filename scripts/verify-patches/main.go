@@ -31,6 +31,22 @@ type verification struct {
 }
 
 var registry = map[string]verification{
+	// Upstream c6f6a92c5 clamps ggml_graph_plan to one thread on every
+	// __wasi__ target; the wasip1-threads build (which defines
+	// _REENTRANT) must keep the requested count or every graph runs on
+	// one core. A thread-count property, not a structural one: go-llama's
+	// thread-scaling test pins it against the released bundle.
+	"wasm-threads-graph-plan.patch": {
+		reason: "verified by go-llama's thread-scaling test against the released bundle",
+	},
+	// The UGM (SentencePiece unigram) tokenizer's byte fallback is a
+	// tokenizer property, not a structural one this tool can read off the
+	// binary; go-llama's ModernBERT tokenizer parity test pins it (a
+	// character without a piece must tokenize to its UTF-8 byte pieces,
+	// as SentencePiece does, instead of <unk>).
+	"ugm-byte-fallback.patch": {
+		reason: "verified by go-llama's ModernBERT tokenizer parity test against the released bundle",
+	},
 	// The q8_0 repack kernels change numeric routing, not a structural
 	// property this tool can read off the binary; their effect is pinned
 	// by go-llama's repack numeric tests, which run against every
@@ -57,6 +73,21 @@ var registry = map[string]verification{
 	},
 	"wasm-legacy-vec-dot-q4-1-q5-1-kernels.patch": {
 		verify: hasExports("dbg_vec_dot_q4_1_q8_1", "dbg_vec_dot_q5_1_q8_1"),
+	},
+	// The GeGLU-erf vector body (ModernBERT-family encoders' GLU) is an
+	// exported retarget hook like the SwiGLU one: structural.
+	"wasm-vec-geglu-erf-kernel.patch": {
+		verify: hasExports("dbg_vec_geglu_erf_f32"),
+	},
+	// LayerNorm row sum/variance and the f16 row converters: exported
+	// retarget hooks, structural.
+	"wasm-vec-norm-cvt-kernels.patch": {
+		verify: hasExports("dbg_vec_sum_f32", "dbg_vec_cvar_f32", "dbg_cpu_fp32_to_fp16", "dbg_cpu_fp16_to_fp32"),
+	},
+	// The 4-wide q8_0 activation quantizer: exported retarget hook,
+	// structural.
+	"wasm-q8-repack-quantize-4x4-export.patch": {
+		verify: hasExports("dbg_quantize_mat_q8_0_4x4"),
 	},
 	"wasm-q8-quantize-round-nearest.patch": {
 		reason: "verified by go-llama's native-parity and prompt batch-invariance tests against the released bundle",

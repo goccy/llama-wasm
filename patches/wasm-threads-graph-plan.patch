@@ -1,0 +1,17 @@
+diff --git a/ggml/src/ggml-cpu/ggml-cpu.c b/ggml/src/ggml-cpu/ggml-cpu.c
+index ab82e3d6c..5145cdee0 100644
+--- a/ggml/src/ggml-cpu/ggml-cpu.c
++++ b/ggml/src/ggml-cpu/ggml-cpu.c
+@@ -2825,8 +2825,10 @@ struct ggml_cplan ggml_graph_plan(
+     n_threads = 1;
+ #endif
+ 
+-#if defined(__wasi__)
+-    // WASI doesn't support parallelism yet
++#if defined(__wasi__) && !defined(_REENTRANT)
++    // WASI without the threads proposal (wasm32-wasip1) cannot run
++    // parallel workers; a wasip1-threads target defines _REENTRANT and
++    // keeps the requested thread count.
+     n_threads = 1;
+ #endif
+ 
