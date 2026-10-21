@@ -149,6 +149,122 @@
       ]
     },
     {
+      "export": "dbg_vec_geglu_erf_f32",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "i64"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "neon",
+          "frame": 16,
+          "file": "dbg_vec_geglu_erf_f32_arm64_neon.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_geglu_erf_f32_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_sum_f32",
+      "params": [
+        "i32",
+        "i64"
+      ],
+      "result": "f64",
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "neon",
+          "frame": 16,
+          "file": "dbg_vec_sum_f32_arm64_neon.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_sum_f32_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_vec_cvar_f32",
+      "params": [
+        "i32",
+        "i64",
+        "i64",
+        "f32"
+      ],
+      "result": "f64",
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "neon",
+          "frame": 16,
+          "file": "dbg_vec_cvar_f32_arm64_neon.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_vec_cvar_f32_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_cpu_fp32_to_fp16",
+      "params": [
+        "i64",
+        "i64",
+        "i64"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "neon",
+          "frame": 16,
+          "file": "dbg_cpu_fp32_to_fp16_arm64_neon.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_cpu_fp32_to_fp16_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_cpu_fp16_to_fp32",
+      "params": [
+        "i64",
+        "i64",
+        "i64"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "neon",
+          "frame": 16,
+          "file": "dbg_cpu_fp16_to_fp32_arm64_neon.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_cpu_fp16_to_fp32_amd64_avx2.s"
+        }
+      ]
+    },
+    {
       "export": "dbg_vec_dot_f16",
       "params": [
         "i32",
@@ -246,6 +362,29 @@
           "feature": "avx2",
           "frame": 16,
           "file": "dbg_quantize_mat_q8_0_4x8_amd64_avx2.s"
+        }
+      ]
+    },
+    {
+      "export": "dbg_quantize_mat_q8_0_4x4",
+      "params": [
+        "i64",
+        "i64",
+        "i64"
+      ],
+      "result": null,
+      "bodies": [
+        {
+          "arch": "arm64",
+          "feature": "neon",
+          "frame": 16,
+          "file": "dbg_quantize_mat_q8_0_4x4_arm64_neon.s"
+        },
+        {
+          "arch": "amd64",
+          "feature": "avx2",
+          "frame": 16,
+          "file": "dbg_quantize_mat_q8_0_4x4_amd64_avx2.s"
         }
       ]
     },

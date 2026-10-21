@@ -1,8 +1,8 @@
 diff --git a/ggml/src/ggml-cpu/CMakeLists.txt b/ggml/src/ggml-cpu/CMakeLists.txt
-index 836bae4d0..b56e80cab 100644
+index d347757e1..c0f89aeee 100644
 --- a/ggml/src/ggml-cpu/CMakeLists.txt
 +++ b/ggml/src/ggml-cpu/CMakeLists.txt
-@@ -566,6 +566,7 @@ function(ggml_add_cpu_backend_variant_impl tag_name)
+@@ -618,6 +618,7 @@ function(ggml_add_cpu_backend_variant_impl tag_name)
      elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "wasm")
          message(STATUS "Wasm detected")
          list (APPEND GGML_CPU_SOURCES ggml-cpu/arch/wasm/quants.c)
@@ -11,10 +11,10 @@ index 836bae4d0..b56e80cab 100644
          message(WARNING "Unknown CPU architecture. Falling back to generic implementations.")
          list(APPEND ARCH_FLAGS -DGGML_CPU_GENERIC)
 diff --git a/ggml/src/ggml-cpu/arch-fallback.h b/ggml/src/ggml-cpu/arch-fallback.h
-index 152e0bac9..9babc733e 100644
+index 4e59d0ae0..27f4c8f96 100644
 --- a/ggml/src/ggml-cpu/arch-fallback.h
 +++ b/ggml/src/ggml-cpu/arch-fallback.h
-@@ -314,7 +314,6 @@
+@@ -332,7 +332,6 @@
  #define ggml_vec_dot_q1_0_q8_0_generic ggml_vec_dot_q1_0_q8_0
  #define ggml_vec_dot_q2_0_q8_0_generic ggml_vec_dot_q2_0_q8_0
  // repack.cpp
@@ -22,15 +22,15 @@ index 152e0bac9..9babc733e 100644
  #define ggml_quantize_mat_q8_0_4x8_generic ggml_quantize_mat_q8_0_4x8
  #define ggml_quantize_mat_q8_K_4x4_generic ggml_quantize_mat_q8_K_4x4
  #define ggml_quantize_mat_q8_K_4x8_generic ggml_quantize_mat_q8_K_4x8
-@@ -332,7 +331,6 @@
+@@ -352,7 +351,6 @@
  #define ggml_gemv_iq4_nl_8x8_q8_0_generic ggml_gemv_iq4_nl_8x8_q8_0
  #define ggml_gemv_mxfp4_4x4_q8_0_generic ggml_gemv_mxfp4_4x4_q8_0
  #define ggml_gemv_mxfp4_8x8_q8_0_generic ggml_gemv_mxfp4_8x8_q8_0
 -#define ggml_gemv_q8_0_4x4_q8_0_generic ggml_gemv_q8_0_4x4_q8_0
  #define ggml_gemv_q8_0_4x8_q8_0_generic ggml_gemv_q8_0_4x8_q8_0
- #define ggml_gemm_q4_0_4x4_q8_0_generic ggml_gemm_q4_0_4x4_q8_0
- #define ggml_gemm_q4_0_4x8_q8_0_generic ggml_gemm_q4_0_4x8_q8_0
-@@ -348,6 +346,5 @@
+ #define ggml_gemm_q1_0_4x4_q8_0_generic ggml_gemm_q1_0_4x4_q8_0
+ #define ggml_gemm_q1_0_4x8_q8_0_generic ggml_gemm_q1_0_4x8_q8_0
+@@ -370,6 +368,5 @@
  #define ggml_gemm_iq4_nl_8x8_q8_0_generic ggml_gemm_iq4_nl_8x8_q8_0
  #define ggml_gemm_mxfp4_4x4_q8_0_generic ggml_gemm_mxfp4_4x4_q8_0
  #define ggml_gemm_mxfp4_8x8_q8_0_generic ggml_gemm_mxfp4_8x8_q8_0
@@ -277,10 +277,10 @@ index 000000000..9db77fe9d
 +#endif
 +}
 diff --git a/ggml/src/ggml-cpu/repack.cpp b/ggml/src/ggml-cpu/repack.cpp
-index 9689ca3ce..f8b05cce7 100644
+index fdeb9abbc..b1a4a3029 100644
 --- a/ggml/src/ggml-cpu/repack.cpp
 +++ b/ggml/src/ggml-cpu/repack.cpp
-@@ -4707,6 +4707,11 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
+@@ -5161,6 +5161,11 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
                  return &q8_0_4x4_q8_0;
              }
          }

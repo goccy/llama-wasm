@@ -1,15 +1,15 @@
 diff --git a/ggml/src/ggml-cpu/arch-fallback.h b/ggml/src/ggml-cpu/arch-fallback.h
-index 9babc733e..f1e0acd57 100644
+index 27f4c8f96..adfeb8247 100644
 --- a/ggml/src/ggml-cpu/arch-fallback.h
 +++ b/ggml/src/ggml-cpu/arch-fallback.h
-@@ -314,7 +314,6 @@
+@@ -332,7 +332,6 @@
  #define ggml_vec_dot_q1_0_q8_0_generic ggml_vec_dot_q1_0_q8_0
  #define ggml_vec_dot_q2_0_q8_0_generic ggml_vec_dot_q2_0_q8_0
  // repack.cpp
 -#define ggml_quantize_mat_q8_0_4x8_generic ggml_quantize_mat_q8_0_4x8
  #define ggml_quantize_mat_q8_K_4x4_generic ggml_quantize_mat_q8_K_4x4
  #define ggml_quantize_mat_q8_K_4x8_generic ggml_quantize_mat_q8_K_4x8
- #define ggml_gemv_q4_0_4x4_q8_0_generic ggml_gemv_q4_0_4x4_q8_0
+ #define ggml_gemv_q1_0_4x4_q8_0_generic ggml_gemv_q1_0_4x4_q8_0
 diff --git a/ggml/src/ggml-cpu/arch/wasm/repack.cpp b/ggml/src/ggml-cpu/arch/wasm/repack.cpp
 index 9db77fe9d..0a68c7fef 100644
 --- a/ggml/src/ggml-cpu/arch/wasm/repack.cpp
@@ -189,10 +189,10 @@ index 9db77fe9d..0a68c7fef 100644
 +    }
 +}
 diff --git a/ggml/src/ggml-cpu/repack.cpp b/ggml/src/ggml-cpu/repack.cpp
-index 9838c3f57..d9e12b429 100644
+index 5442f68fe..decc63313 100644
 --- a/ggml/src/ggml-cpu/repack.cpp
 +++ b/ggml/src/ggml-cpu/repack.cpp
-@@ -3974,6 +3974,60 @@ template <> int repack<block_mxfp4, 8, 8>(struct ggml_tensor * t, const void * d
+@@ -4371,6 +4371,60 @@ template <> int repack<block_mxfp4, 8, 8>(struct ggml_tensor * t, const void * d
      return repack_mxfp4_to_mxfp4_8_bl(t, 8, data, data_size);
  }
  
@@ -253,7 +253,7 @@ index 9838c3f57..d9e12b429 100644
  template <> int repack<block_q8_0, 4, 4>(struct ggml_tensor * t, const void * data, size_t data_size) {
      return repack_q8_0_to_q8_0_4_bl(t, 4, data, data_size);
  }
-@@ -4071,6 +4125,12 @@ template <> void gemv<block_mxfp4, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_
+@@ -4476,6 +4530,12 @@ template <> void gemv<block_mxfp4, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_
      ggml_gemv_mxfp4_8x8_q8_0(n, s, bs, vx, vy, nr, nc);
  }
  
@@ -266,7 +266,7 @@ index 9838c3f57..d9e12b429 100644
  template <> void gemv<block_q8_0, 4, 4, GGML_TYPE_Q8_0>(int n, float * s, size_t bs, const void * vx, const void * vy, int nr, int nc) {
      ggml_gemv_q8_0_4x4_q8_0(n, s, bs, vx, vy, nr, nc);
  }
-@@ -4168,6 +4228,12 @@ template <> void gemm<block_mxfp4, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_
+@@ -4581,6 +4641,12 @@ template <> void gemm<block_mxfp4, 8, 8, GGML_TYPE_Q8_0>(int n, float * s, size_
      ggml_gemm_mxfp4_8x8_q8_0(n, s, bs, vx, vy, nr, nc);
  }
  
@@ -279,7 +279,7 @@ index 9838c3f57..d9e12b429 100644
  template <> void gemm<block_q8_0, 4, 4, GGML_TYPE_Q8_0>(int n, float * s, size_t bs, const void * vx, const void * vy, int nr, int nc) {
      ggml_gemm_q8_0_4x4_q8_0(n, s, bs, vx, vy, nr, nc);
  }
-@@ -4604,6 +4670,11 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
+@@ -5021,6 +5087,11 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
  
      // instance for Q8_0
      static const ggml::cpu::repack::tensor_traits<block_q8_0, 4, 4, GGML_TYPE_Q8_0> q8_0_4x4_q8_0;
@@ -291,7 +291,7 @@ index 9838c3f57..d9e12b429 100644
      static const ggml::cpu::repack::tensor_traits<block_q8_0, 8, 4, GGML_TYPE_Q8_0> q8_0_4x8_q8_0;
  
      // instances for RISC-V
-@@ -4768,6 +4839,12 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
+@@ -5198,6 +5269,12 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
                  return &mxfp4_4x4_q8_0;
              }
          }
@@ -305,10 +305,10 @@ index 9838c3f57..d9e12b429 100644
          if (ggml_cpu_has_neon() && ggml_cpu_has_matmul_int8()) {
              if (cur->ne[1] % 4 == 0) {
 diff --git a/ggml/src/ggml-cpu/repack.h b/ggml/src/ggml-cpu/repack.h
-index cb21edf62..581e530c2 100644
+index fc6715c39..b7f9386c1 100644
 --- a/ggml/src/ggml-cpu/repack.h
 +++ b/ggml/src/ggml-cpu/repack.h
-@@ -40,6 +40,24 @@ using block_q8_0x4 = block<8, 4>;
+@@ -45,6 +45,24 @@ using block_q8_0x4 = block<8, 4>;
  using block_q8_0x8 = block<8, 8>;
  using block_q8_0x16 = block<8, 16>;
  
@@ -333,15 +333,15 @@ index cb21edf62..581e530c2 100644
  struct block_q4_Kx8 {
      ggml_half d[8];      // super-block scale for quantized scales
      ggml_half dmin[8];   // super-block scale for quantized mins
-@@ -155,6 +173,7 @@ void ggml_gemv_iq4_nl_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const
+@@ -162,6 +180,7 @@ void ggml_gemv_iq4_nl_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const
  void ggml_gemv_iq4_nl_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
  void ggml_gemv_mxfp4_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
  void ggml_gemv_mxfp4_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
 +void ggml_gemv_q5_0_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
  void ggml_gemv_q8_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
  void ggml_gemv_q8_0_4x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
- void ggml_gemm_q4_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
-@@ -171,6 +190,7 @@ void ggml_gemm_iq4_nl_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const
+ void ggml_gemm_q1_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
+@@ -180,6 +199,7 @@ void ggml_gemm_iq4_nl_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const
  void ggml_gemm_iq4_nl_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
  void ggml_gemm_mxfp4_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);
  void ggml_gemm_mxfp4_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc);

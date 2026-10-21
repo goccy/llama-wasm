@@ -25,6 +25,12 @@ func TestVecExpKernelShape(t *testing.T) {
 	if s := x64VecSwigluKernel("Fn14avx2", pool, true); !strings.Contains(s, "VDIVPS") {
 		t.Error("x64 swiglu shape")
 	}
+	if s := a64VecGegluErfKernel("Fn15neon", pool, true); !strings.Contains(s, "fmls v5.4s, v4.4s, v0.4s") || !strings.Contains(s, "orr v5.16b") {
+		t.Error("a64 geglu shape")
+	}
+	if s := x64VecGegluErfKernel("Fn15avx2", pool, true); !strings.Contains(s, "VORPS") || !strings.Contains(s, "VDIVPS") {
+		t.Error("x64 geglu shape")
+	}
 	if !strings.Contains(pool.Emit(), "GLOBL") {
 		t.Error("constant pool empty")
 	}
@@ -166,9 +172,48 @@ func runSwiglu(t *testing.T, kernel func(m *mockModule, l0 int32, l1, l2, l3 int
 		}
 	}
 }
+
+// runGeglu checks the GeGLU-erf kernel against 0.5*x*(1+erf(x/sqrt2))*g in
+// float64. The A&S 7.1.26 erf carries 1.5e-7 of absolute error, which is
+// the whole value where 1+erf vanishes (x below about -4), so the bound
+// has an absolute term scaled by |x*g| next to the relative one.
+func runGeglu(t *testing.T, kernel func(m *mockModule, l0 int32, l1, l2, l3 int64), n int) {
+	t.Helper()
+	x := inputs(n, uint32(n)*13+7)
+	g := inputs(n, uint32(n)*29+1)
+	for i := range x {
+		if math.IsInf(float64(x[i]), 0) || x[i] < -30 {
+			x[i] = -8 + float32(i%17)
+		}
+		if math.IsInf(float64(g[i]), 0) {
+			g[i] = 2
+		}
+	}
+	mem := make([]byte, 4096+12*n*4)
+	xOff := 256
+	gOff := xOff + n*4 + 64
+	yOff := gOff + n*4 + 64
+	for i := range x {
+		putF32(mem, xOff+4*i, x[i])
+		putF32(mem, gOff+4*i, g[i])
+	}
+	memSize := uint64(len(mem))
+	m := &mockModule{memSizePtr: &memSize, mem: unsafe.Pointer(&mem[0])}
+	before := append([]byte(nil), mem...)
+	kernel(m, int32(n), int64(yOff), int64(xOff), int64(gOff))
+	refCheck(t, kernel, before, mem, []refArg{rI32(int32(n)), rPtr(int64(yOff)), rPtr(int64(xOff)), rPtr(int64(gOff))},
+		nil, []refOut{outF32(yOff, 4*n)}, refTolExp)
+	for i := range x {
+		w := 0.5 * float64(x[i]) * (1 + math.Erf(float64(x[i])/math.Sqrt2)) * float64(g[i])
+		got := getF32(mem, yOff+4*i)
+		if math.Abs(float64(got)-w) > 4e-6*math.Abs(w)+4e-7*math.Abs(float64(x[i])*float64(g[i]))+1e-30 {
+			t.Fatalf("n=%d y[%d] = %v, want %v (x=%v g=%v)", n, i, got, w, x[i], g[i])
+		}
+	}
+}
 `
 
-const vecExpDecls = "\nfunc SoftMaxKernel(m *mockModule, l0 int32, l1, l2 int64, l3 float32) float64\nfunc SwigluKernel(m *mockModule, l0 int32, l1, l2, l3 int64)\nfunc trapstub()\n\nvar _ = trapstub\n"
+const vecExpDecls = "\nfunc SoftMaxKernel(m *mockModule, l0 int32, l1, l2 int64, l3 float32) float64\nfunc SwigluKernel(m *mockModule, l0 int32, l1, l2, l3 int64)\nfunc GegluKernel(m *mockModule, l0 int32, l1, l2, l3 int64)\nfunc trapstub()\n\nvar _ = trapstub\n"
 
 const vecExpRunTest = `package exprun
 
@@ -178,6 +223,7 @@ func TestVecExp(t *testing.T) {
 	for _, n := range []int{64, 1, 3, 4, 7, 9, 15, 16, 4864} {
 		runSoftMax(t, SoftMaxKernel, n)
 		runSwiglu(t, SwigluKernel, n)
+		runGeglu(t, GegluKernel, n)
 	}
 }
 `
@@ -186,9 +232,10 @@ func TestA64VecExpKernelGate(t *testing.T) {
 	_, smBytes, _, swBytes := vecExpArgs(true)
 	pool := &ConstPool{}
 	asm := wrap("arm64", "SoftMaxKernel", 16, smBytes, "neon", a64VecSoftMaxKernel("SoftMaxKernel", pool, true)) +
-		wrap("arm64", "SwigluKernel", 16, swBytes, "neon", a64VecSwigluKernel("SwigluKernel", pool, true)) + pool.Emit()
+		wrap("arm64", "SwigluKernel", 16, swBytes, "neon", a64VecSwigluKernel("SwigluKernel", pool, true)) +
+		wrap("arm64", "GegluKernel", 16, swBytes, "neon", a64VecGegluErfKernel("GegluKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "exprun", "arm64", asm, vecExpRunSrc+vecExpDecls, vecExpRunTest, "SoftMaxKernel", "dbg_vec_soft_max_f32", "SwigluKernel", "dbg_vec_swiglu_f32")
+	writeRunTree(t, dir, "exprun", "arm64", asm, vecExpRunSrc+vecExpDecls, vecExpRunTest, "SoftMaxKernel", "dbg_vec_soft_max_f32", "SwigluKernel", "dbg_vec_swiglu_f32", "GegluKernel", "dbg_vec_geglu_erf_f32")
 	runArm64Gate(t, dir, ".", "TestVecExp", asm)
 }
 
@@ -196,8 +243,9 @@ func TestX64VecExpKernelGate(t *testing.T) {
 	_, smBytes, _, swBytes := vecExpArgs(true)
 	pool := &ConstPool{}
 	asm := wrap("amd64", "SoftMaxKernel", 16, smBytes, "avx2", x64VecSoftMaxKernel("SoftMaxKernel", pool, true)) +
-		wrap("amd64", "SwigluKernel", 16, swBytes, "avx2", x64VecSwigluKernel("SwigluKernel", pool, true)) + pool.Emit()
+		wrap("amd64", "SwigluKernel", 16, swBytes, "avx2", x64VecSwigluKernel("SwigluKernel", pool, true)) +
+		wrap("amd64", "GegluKernel", 16, swBytes, "avx2", x64VecGegluErfKernel("GegluKernel", pool, true)) + pool.Emit()
 	dir := t.TempDir()
-	writeRunTree(t, dir, "exprun", "amd64", asm, vecExpRunSrc+vecExpDecls, vecExpRunTest, "SoftMaxKernel", "dbg_vec_soft_max_f32", "SwigluKernel", "dbg_vec_swiglu_f32")
+	writeRunTree(t, dir, "exprun", "amd64", asm, vecExpRunSrc+vecExpDecls, vecExpRunTest, "SoftMaxKernel", "dbg_vec_soft_max_f32", "SwigluKernel", "dbg_vec_swiglu_f32", "GegluKernel", "dbg_vec_geglu_erf_f32")
 	runAmd64Gate(t, dir, ".", "TestVecExp", asm)
 }

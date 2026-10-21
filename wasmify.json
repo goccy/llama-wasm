@@ -2,7 +2,7 @@
   "version": "1.0",
   "upstream": {
     "path": "./llama.cpp",
-    "commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
+    "commit": "b6334e37e6ef286fc5091a41b6561b2113d915fb",
     "branch": "HEAD"
   },
   "project": {
@@ -180,8 +180,8 @@
   },
   "phases": {
     "gen-proto": {
-      "completed_at": "2026-09-14T12:12:55Z",
-      "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
+      "completed_at": "2026-10-16T04:35:25Z",
+      "upstream_commit": "b6334e37e6ef286fc5091a41b6561b2113d915fb",
       "output_files": [
         "proto/llama.proto",
         "proto/wasmify/options.proto",
@@ -190,8 +190,8 @@
       ]
     },
     "parse-headers": {
-      "completed_at": "2026-09-14T12:12:55Z",
-      "upstream_commit": "11924d4c17abc27383376a1ac6a24fa3e36c1c0c",
+      "completed_at": "2026-10-16T04:35:25Z",
+      "upstream_commit": "b6334e37e6ef286fc5091a41b6561b2113d915fb",
       "output_files": [
         "api-spec.json"
       ]
