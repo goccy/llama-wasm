@@ -425,6 +425,16 @@ jobs:
       - name: go-llama encoder pass
         if: steps.probe.outputs.probe_ms <= 2000
         run: ./encoder-bin -model "$MODEL_PATH" -threads 1,4 -tokens 32,128,512 -reps 5 -json encoder.json
+      - name: go-llama profiled pass (512 tokens, 1 thread)
+        if: steps.probe.outputs.probe_ms <= 2000
+        run: |
+          ./encoder-bin -model "$MODEL_PATH" -threads 1 -tokens 512 -reps 3 -cpuprofile pass512-t1.prof
+          go tool pprof -top -nodecount=30 ./encoder-bin pass512-t1.prof 2>/dev/null | head -40
+      - name: go-llama profiled pass (512 tokens, 4 threads)
+        if: steps.probe.outputs.probe_ms <= 2000
+        run: |
+          ./encoder-bin -model "$MODEL_PATH" -threads 4 -tokens 512 -reps 3 -cpuprofile pass512-t4.prof
+          go tool pprof -top -nodecount=30 ./encoder-bin pass512-t4.prof 2>/dev/null | head -40
       - name: Summary
         if: steps.probe.outputs.probe_ms <= 2000
         run: python3 bench/encoder/summary.py encoder.json native.json "encoder on ${{ matrix.os }} (${{ steps.cpu.outputs.model }})"
@@ -437,4 +447,6 @@ jobs:
             native.json
             probe.json
             probe.prof
+            pass512-t1.prof
+            pass512-t4.prof
             encoder-bin

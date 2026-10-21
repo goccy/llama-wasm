@@ -38,7 +38,11 @@ func main() {
 	cpuProfile := flag.String("cpuprofile", "", "write a CPU profile of the timed passes to this file")
 	flag.Parse()
 	fmt.Println("features:", features())
-	if *cpuProfile != "" {
+	profiling := false
+	startProfile := func() {
+		if *cpuProfile == "" || profiling {
+			return
+		}
 		f, err := os.Create(*cpuProfile)
 		if err != nil {
 			fail(err)
@@ -46,8 +50,13 @@ func main() {
 		if err := pprof.StartCPUProfile(f); err != nil {
 			fail(err)
 		}
-		defer pprof.StopCPUProfile()
+		profiling = true
 	}
+	defer func() {
+		if profiling {
+			pprof.StopCPUProfile()
+		}
+	}()
 	if *model == "" {
 		fmt.Fprintln(os.Stderr, "encoder: -model is required")
 		os.Exit(2)
@@ -82,6 +91,7 @@ func main() {
 					fail(err)
 				}
 			}
+			startProfile()
 			best := time.Hour
 			var total time.Duration
 			for i := 0; i < *reps; i++ {
@@ -102,6 +112,10 @@ func main() {
 			fmt.Printf("threads=%d tokens=%4d  avg %8.1f ms  best %8.1f ms  %7.0f tok/s\n", nt, n, r.AvgMs, r.BestMs, r.AvgTokS)
 		}
 		ctx.Close()
+	}
+	if profiling {
+		pprof.StopCPUProfile()
+		profiling = false
 	}
 	if *jsonOut != "" {
 		b, _ := json.MarshalIndent(results, "", " ")
