@@ -325,10 +325,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm]
+        include:
+          - os: ubuntu-latest
+            goamd64: v2
+          - os: ubuntu-24.04-arm
+            goamd64: ""
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
+      # The amd64 bundle carries its assembly only under GOAMD64=v2 or
+      # higher; at v1 every vector helper is the scalar Go fallback.
+      GOAMD64: ${{ matrix.goamd64 }}
       HF_MODEL: sbintuitions/modernbert-ja-310m
       FTYPE: q8_0
       MODEL_PATH: bench/encoder/model/modernbert-ja-310m-q8_0.gguf
@@ -355,6 +362,7 @@ jobs:
           echo "model=${model:-unknown}" >> "$GITHUB_OUTPUT"
           echo "cpu: ${model:-unknown} ($(nproc) cores)"
           lscpu | grep -oE '\b(avx2|avx512f|avx512_vnni|avx_vnni|asimd|i8mm|sve)\b' | sort -u | tr '\n' ' '; echo
+          echo "GOAMD64=$(go env GOAMD64)"
       - name: Submodule commit
         id: sub
         run: echo "sha=$(git -C llama.cpp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
