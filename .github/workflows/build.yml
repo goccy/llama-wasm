@@ -30,6 +30,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      hf_model:
+        description: Hugging Face model the encoder benchmark converts and runs
+        default: sbintuitions/modernbert-ja-310m
+        type: string
 
 permissions:
   contents: read           # build-only: no release asset upload here
@@ -336,9 +341,9 @@ jobs:
       # The amd64 bundle carries its assembly only under GOAMD64=v2 or
       # higher; at v1 every vector helper is the scalar Go fallback.
       GOAMD64: ${{ matrix.goamd64 }}
-      HF_MODEL: sbintuitions/modernbert-ja-310m
+      HF_MODEL: ${{ inputs.hf_model || 'sbintuitions/modernbert-ja-310m' }}
       FTYPE: q8_0
-      MODEL_PATH: bench/encoder/model/modernbert-ja-310m-q8_0.gguf
+      MODEL_PATH: bench/encoder/model/encoder-q8_0.gguf
     steps:
       - uses: actions/checkout@v4
         with:
@@ -437,7 +442,7 @@ jobs:
           go tool pprof -top -nodecount=30 ./encoder-bin pass512-t4.prof 2>/dev/null | head -40
       - name: Summary
         if: steps.probe.outputs.probe_ms <= 2000
-        run: python3 bench/encoder/summary.py encoder.json native.json "encoder on ${{ matrix.os }} (${{ steps.cpu.outputs.model }})"
+        run: python3 bench/encoder/summary.py encoder.json native.json "$HF_MODEL $FTYPE on ${{ matrix.os }} (${{ steps.cpu.outputs.model }})"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
